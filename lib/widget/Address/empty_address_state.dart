@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../Utils/constants.dart';
+import '../../utils/constants.dart';
 
 
 class EmptyAddressState extends StatelessWidget {

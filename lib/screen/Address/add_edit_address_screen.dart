@@ -5,7 +5,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 
-import '../../Utils/constants.dart';
+import '../../utils/constants.dart';
 import '../../model/Address/address_model.dart';
 import '../../services/navigation_service.dart';
 

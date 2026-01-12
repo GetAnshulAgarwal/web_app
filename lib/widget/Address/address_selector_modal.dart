@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../Utils/constants.dart';
+import '../../utils/constants.dart';
 import '../../model/Address/address_model.dart';
 
 class AddressSelectorModal extends StatelessWidget {

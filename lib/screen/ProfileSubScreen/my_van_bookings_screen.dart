@@ -5,7 +5,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../services/van_booking_service.dart';
-import '../../Utils/booking/booking_utils.dart';
+import '../../utils/booking/booking_utils.dart';
 import 'package:provider/provider.dart';
 import '../../providers/booking_provider.dart';
 
