@@ -123,6 +123,7 @@ class _CartScreenState extends State<CartScreen> {
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet); // REQUIRED for stability
 
     if (isAuthenticated) {
       Future.wait([
@@ -134,6 +135,11 @@ class _CartScreenState extends State<CartScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _syncWithProvider();
     });
+  }
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    // Just log it or show a simple message.
+    // On Web, this is rarely triggered but the listener must exist.
+    print("External Wallet selected: ${response.walletName}");
   }
 
   void _syncWithProvider() {
@@ -182,18 +188,21 @@ class _CartScreenState extends State<CartScreen> {
   void _handlePaymentError(PaymentFailureResponse response) {
     if (!mounted) return;
 
+    print("Payment Error: ${response.code} - ${response.message}");
+
     setState(() {
       _isProcessingPayment = false;
     });
 
-    _showFailureDialog('Payment Failed',
-        message: response.message ?? 'Your payment could not be processed.');
+    // On Web, closing the popup without paying triggers a specific error code (0 or 2)
+    // We can show a gentler message for cancellations.
+    String msg = response.message ?? 'Payment failed';
+    if (response.code == Razorpay.PAYMENT_CANCELLED) {
+      msg = "Payment cancelled by user";
+    }
 
-    setState(() {
-      selectedPaymentMethod = 'COD';
-    });
+    _showFailureDialog('Payment Failed', message: msg);
   }
-
   /*void _showSuccessMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -232,19 +241,27 @@ class _CartScreenState extends State<CartScreen> {
     final userData = UserData();
     final user = userData.getCurrentUser();
 
+    // Ensure amount is valid
     double finalRupeeAmount = grandTotal - (_lastDiscountAmount ?? 0);
+    if (finalRupeeAmount < 1) {
+      _showErrorMessage('Amount must be at least ₹1');
+      return;
+    }
 
+    // Prepare Options
     var options = {
-      'key': 'rzp_live_RN5l7ppvEWmNxm',
-      'amount': (finalRupeeAmount * 100).toInt(),
+      'key': 'rzp_live_RN5l7ppvEWmNxm', // Ensure this is your correct LIVE key
+      'amount': (finalRupeeAmount * 100).toInt(), // Amount in paise
       'name': 'Grocery On Wheels',
-      'description': 'Order Payment',
+      'description': 'Order #${DateTime.now().millisecondsSinceEpoch}', // Unique desc helps tracking
+      'retry': {'enabled': true, 'max_count': 1}, // Helps if network fluctuates
+      'send_sms_hash': true,
       'prefill': {
-        'contact': user?.phone ?? '9999999999',
-        'email': user?.email ?? 'customer@example.com',
+        'contact': user?.phone ?? '',
+        'email': user?.email ?? '',
       },
       'theme': {
-        'color': '#795548',
+        'color': '#5D4037',
       },
     };
 
@@ -257,7 +274,8 @@ class _CartScreenState extends State<CartScreen> {
       setState(() {
         _isProcessingPayment = false;
       });
-      _showErrorMessage('Error opening payment: $e');
+      print("Razorpay Error: $e");
+      _showErrorMessage('Error opening payment gateway. Please retry.');
     }
   }
 
