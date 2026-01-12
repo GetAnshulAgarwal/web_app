@@ -49,6 +49,7 @@ dependencies:
   sms_autofill:
   shimmer:
   razorpay_flutter:
+  razorpay_web:
   foundation:
   firebase_remote_config:
   package_info_plus:
