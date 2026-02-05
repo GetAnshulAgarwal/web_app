@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../authentication/user_data.dart';
-import '../../Utils/date_formatter.dart';
+import '../../utils/date_formatter.dart';
 import '../../model/Support/support_ticket.dart';
 import '../../services/Support/support_api_service.dart';
 import '../ProfileSubScreen/help_and_support_screen.dart';
