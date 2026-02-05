@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 
-import '../../utils/date_formatter.dart';
+import '../../Utils/date_formatter.dart';
 import '../../model/Support/support_message.dart';
 import '../../model/Support/support_ticket.dart';
 import '../../services/Support/support_api_service.dart';
