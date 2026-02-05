@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
@@ -84,7 +85,11 @@ class _CartScreenState extends State<CartScreen> {
   Timer? _slotsRefreshTimer;
   bool _isAutoRefreshEnabled = true;
   // --- END NEW UI STATE ---
-
+  // Wallet Controller
+  Map<String, dynamic>? _walletSettings;
+  bool _isRedemptionApplied = false; // Tracks if user clicked "Apply" locally
+  double _calculatedRedemptionDiscount = 0.0;
+  int _pointsToRedeem = 0;
   // Checkout form controllers
   final _formKey = GlobalKey<FormState>();
   final _houseNoController = TextEditingController();
@@ -123,23 +128,19 @@ class _CartScreenState extends State<CartScreen> {
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
-    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet); // REQUIRED for stability
 
     if (isAuthenticated) {
       Future.wait([
         loadDeliverySlots(),
         fetchWalletBalance(),
         loadPopularProducts(),
+        fetchWalletSettings(), // <--- Added this call
+
       ]);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _syncWithProvider();
     });
-  }
-  void _handleExternalWallet(ExternalWalletResponse response) {
-    // Just log it or show a simple message.
-    // On Web, this is rarely triggered but the listener must exist.
-    print("External Wallet selected: ${response.walletName}");
   }
 
   void _syncWithProvider() {
@@ -188,21 +189,18 @@ class _CartScreenState extends State<CartScreen> {
   void _handlePaymentError(PaymentFailureResponse response) {
     if (!mounted) return;
 
-    print("Payment Error: ${response.code} - ${response.message}");
-
     setState(() {
       _isProcessingPayment = false;
     });
 
-    // On Web, closing the popup without paying triggers a specific error code (0 or 2)
-    // We can show a gentler message for cancellations.
-    String msg = response.message ?? 'Payment failed';
-    if (response.code == Razorpay.PAYMENT_CANCELLED) {
-      msg = "Payment cancelled by user";
-    }
+    _showFailureDialog('Payment Failed',
+        message: response.message ?? 'Your payment could not be processed.');
 
-    _showFailureDialog('Payment Failed', message: msg);
+    setState(() {
+      selectedPaymentMethod = 'COD';
+    });
   }
+
   /*void _showSuccessMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -241,27 +239,19 @@ class _CartScreenState extends State<CartScreen> {
     final userData = UserData();
     final user = userData.getCurrentUser();
 
-    // Ensure amount is valid
-    double finalRupeeAmount = grandTotal - (_lastDiscountAmount ?? 0);
-    if (finalRupeeAmount < 1) {
-      _showErrorMessage('Amount must be at least ₹1');
-      return;
-    }
+    double finalRupeeAmount = grandTotal;
 
-    // Prepare Options
     var options = {
-      'key': 'rzp_live_RN5l7ppvEWmNxm', // Ensure this is your correct LIVE key
-      'amount': (finalRupeeAmount * 100).toInt(), // Amount in paise
+      'key': 'rzp_live_RN5l7ppvEWmNxm',
+      'amount': (finalRupeeAmount * 100).toInt(),
       'name': 'Grocery On Wheels',
-      'description': 'Order #${DateTime.now().millisecondsSinceEpoch}', // Unique desc helps tracking
-      'retry': {'enabled': true, 'max_count': 1}, // Helps if network fluctuates
-      'send_sms_hash': true,
+      'description': 'Order Payment',
       'prefill': {
-        'contact': user?.phone ?? '',
-        'email': user?.email ?? '',
+        'contact': user?.phone ?? '9999999999',
+        'email': user?.email ?? 'customer@example.com',
       },
       'theme': {
-        'color': '#5D4037',
+        'color': '#795548',
       },
     };
 
@@ -274,8 +264,7 @@ class _CartScreenState extends State<CartScreen> {
       setState(() {
         _isProcessingPayment = false;
       });
-      print("Razorpay Error: $e");
-      _showErrorMessage('Error opening payment gateway. Please retry.');
+      _showErrorMessage('Error opening payment: $e');
     }
   }
 
@@ -881,33 +870,76 @@ class _CartScreenState extends State<CartScreen> {
         return;
       }
 
-      if (mounted) setState(() => isWalletLoading = true);
+      // Optimization: Only show the loading spinner if we have no points loaded yet.
+      // This prevents the UI from flickering when we refresh balance after an order.
+      if (walletPoints == 0 && mounted) {
+        setState(() => isWalletLoading = true);
+      }
+
       final resp = await WalletApiService.getBalance(
         customerId: userId,
         token: token,
       );
 
+      // If the screen was closed while fetching, stop here
+      if (!mounted) return;
+
       int parsedPoints = 0;
       if (resp != null) {
         final data = resp['data'] as Map<String, dynamic>?;
         if (data != null) {
-          final dynamic p =
-              data['pointsBalance'] ?? data['points'] ?? data['points_balance'];
-          if (p is int) parsedPoints = p;
-          if (p is String) parsedPoints = int.tryParse(p) ?? 0;
-          if (p is double) parsedPoints = p.toInt();
+          // Robust parsing to handle 'points', 'pointsBalance', or 'points_balance'
+          final dynamic p = data['pointsBalance'] ?? data['points'] ?? data['points_balance'];
+
+          if (p is int) {
+            parsedPoints = p;
+          } else if (p is String) {
+            parsedPoints = int.tryParse(p) ?? 0;
+          } else if (p is double) {
+            parsedPoints = p.toInt();
+          }
         }
       }
 
-      if (mounted) {
-        setState(() {
-          walletPoints = parsedPoints;
-          isWalletLoading = false;
-        });
-      }
+      setState(() {
+        walletPoints = parsedPoints;
+        isWalletLoading = false;
+      });
+
     } catch (e) {
       print('Failed to fetch wallet balance: $e');
-      if (mounted) setState(() => isWalletLoading = false);
+      if (mounted) {
+        setState(() => isWalletLoading = false);
+      }
+    }
+  }
+
+// Add this new function
+  Future<void> fetchWalletSettings() async {
+    // You can move this to WalletApiService, but here is a direct implementation for CartScreen
+    try {
+      final userData = UserData();
+      final token = userData.getToken();
+      final headers = <String, String>{'Content-Type': 'application/json'};
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+
+      final response = await http.get(
+        Uri.parse('https://pos.inspiredgrow.in/vps/referral/settings'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final result = json.decode(response.body);
+        if (result['success'] == true && mounted) {
+          setState(() {
+            _walletSettings = result['data'];
+          });
+        }
+      }
+    } catch (e) {
+      print('Error fetching wallet settings: $e');
     }
   }
 
@@ -1016,10 +1048,142 @@ class _CartScreenState extends State<CartScreen> {
 
   double get currentDeliveryFee => deliveryFee;
 
+  @override
   double get grandTotal {
-    double total =
-        totalAmount + deliveryFee + handlingFee + selectedTip + selectedDonation;
-    return total - couponDiscountAmount;
+    double total = totalAmount + deliveryFee + handlingFee + selectedTip + selectedDonation;
+
+    // Subtract Coupon Discount
+    total = total - couponDiscountAmount;
+
+    // Subtract Wallet Discount (if applied locally)
+    if (_isRedemptionApplied) {
+      total = total - _calculatedRedemptionDiscount;
+    }
+
+    return total < 0 ? 0.0 : total;
+  }
+
+  void _calculateAndApplyRedemption() {
+    if (_walletSettings == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Loading redemption rules, please wait...')),
+      );
+      fetchWalletSettings();
+      return;
+    }
+
+    // 1. Check Min Spend
+    final double minSpend = (_walletSettings!['pointsRedemptionMinSpend'] as num?)?.toDouble() ?? 2000.0;
+    if (totalAmount < minSpend) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Minimum order of ₹${minSpend.toStringAsFixed(0)} required to redeem points'),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
+
+    if (walletPoints <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You have 0 points to redeem')),
+      );
+      return;
+    }
+
+    // 2. Calculate Max Discount allowed (Percentage of Total)
+    final double discountPercent = (_walletSettings!['pointsRedemptionDiscountPercent'] as num?)?.toDouble() ?? 5.0;
+    final double maxDiscountByPercent = totalAmount * (discountPercent / 100);
+
+    // 3. Calculate Points Needed
+    // Ratio: How many points = 1 Rupee? (e.g. 1 point = 1 rupee)
+    final double ratio = (_walletSettings!['pointsToRupeeRatio'] as num?)?.toDouble() ?? 1.0;
+
+    // Max points we can physically use based on the % cap
+    final double maxPointsUsableByLimit = maxDiscountByPercent * ratio;
+
+    // Actual points to use is the lesser of (User Balance) vs (Max Allowed)
+    int pointsToUse = 0;
+    if (walletPoints >= maxPointsUsableByLimit) {
+      pointsToUse = maxPointsUsableByLimit.toInt();
+    } else {
+      pointsToUse = walletPoints;
+    }
+
+    // 4. Final Rupee Value
+    final double finalDiscountValue = pointsToUse / ratio;
+
+    // 5. Show Confirmation Dialog
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.stars, color: Colors.orange),
+            SizedBox(width: 10),
+            Text('Redeem Points'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Available Balance: $walletPoints points'),
+            const Divider(),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Points to use:'),
+                Text('$pointsToUse', style: const TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Discount Amount:', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  '-₹${finalDiscountValue.toStringAsFixed(2)}',
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green[700]),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Points will be deducted when you place the order.',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600], fontStyle: FontStyle.italic),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                _isRedemptionApplied = true;
+                _calculatedRedemptionDiscount = finalDiscountValue;
+                _pointsToRedeem = pointsToUse;
+
+                // Update legacy variables if used by other widgets
+                _lastDiscountAmount = finalDiscountValue;
+                _isRedeemed = true;
+              });
+
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Points applied! Discount will be processed at checkout.'),
+                backgroundColor: Colors.green,
+              ));
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
+    );
   }
 
   void updateTip(String amount, double value) {
@@ -1946,7 +2110,7 @@ class _CartScreenState extends State<CartScreen> {
                         ],
                       )
                           : Text(
-                        'Place Order - ₹${(grandTotal - (_lastDiscountAmount ?? 0)).toStringAsFixed(2)}',
+                        'Place Order - ₹${grandTotal.toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -2288,88 +2452,88 @@ class _CartScreenState extends State<CartScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        if (!_isRedeemed)
-          GestureDetector(
-            onTap: _isProcessingPayment
-                ? null
-                : () {
-              setState(() {
-                selectedPaymentMethod = 'COD';
-              });
-              setModalState(() {
-                selectedPaymentMethod = 'COD';
-              });
-            },
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
+        // if (!_isRedeemed)
+        GestureDetector(
+          onTap: _isProcessingPayment
+              ? null
+              : () {
+            setState(() {
+              selectedPaymentMethod = 'COD';
+            });
+            setModalState(() {
+              selectedPaymentMethod = 'COD';
+            });
+          },
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: selectedPaymentMethod == 'COD'
+                  ? Colors.brown.shade50
+                  : Colors.grey.shade50,
+              border: Border.all(
                 color: selectedPaymentMethod == 'COD'
-                    ? Colors.brown.shade50
-                    : Colors.grey.shade50,
-                border: Border.all(
-                  color: selectedPaymentMethod == 'COD'
-                      ? Colors.brown.shade800
-                      : Colors.grey.shade300,
-                  width: selectedPaymentMethod == 'COD' ? 2 : 1,
-                ),
-                borderRadius: BorderRadius.circular(12),
+                    ? Colors.brown.shade800
+                    : Colors.grey.shade300,
+                width: selectedPaymentMethod == 'COD' ? 2 : 1,
               ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: selectedPaymentMethod == 'COD'
-                          ? Colors.brown.shade800
-                          : Colors.grey.shade400,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(
-                      Icons.money,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Cash on Delivery',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: selectedPaymentMethod == 'COD'
-                                ? Colors.brown.shade700
-                                : Colors.grey.shade700,
-                            fontSize: 16,
-                          ),
-                        ),
-                        Text(
-                          'Pay ₹${grandTotal.toStringAsFixed(2)} when order arrives',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: selectedPaymentMethod == 'COD'
-                                ? Colors.brown.shade600
-                                : Colors.grey.shade600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Icon(
-                    selectedPaymentMethod == 'COD'
-                        ? Icons.check_circle
-                        : Icons.radio_button_unchecked,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
                     color: selectedPaymentMethod == 'COD'
                         ? Colors.brown.shade800
                         : Colors.grey.shade400,
-                    size: 24,
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                ],
-              ),
+                  child: const Icon(
+                    Icons.money,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Cash on Delivery',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: selectedPaymentMethod == 'COD'
+                              ? Colors.brown.shade700
+                              : Colors.grey.shade700,
+                          fontSize: 16,
+                        ),
+                      ),
+                      Text(
+                        'Pay ₹${grandTotal.toStringAsFixed(2)} when order arrives',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: selectedPaymentMethod == 'COD'
+                              ? Colors.brown.shade600
+                              : Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  selectedPaymentMethod == 'COD'
+                      ? Icons.check_circle
+                      : Icons.radio_button_unchecked,
+                  color: selectedPaymentMethod == 'COD'
+                      ? Colors.brown.shade800
+                      : Colors.grey.shade400,
+                  size: 24,
+                ),
+              ],
             ),
           ),
+        ),
       ],
     );
   }
@@ -2432,49 +2596,59 @@ class _CartScreenState extends State<CartScreen> {
     }
   }
 
-  Future<void> _handleRazorpayPaymentSuccess(
-      PaymentSuccessResponse response,
-      ) async {
-    try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => Center(
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: Colors.brown.shade800),
-                const SizedBox(height: 16),
-                const Text('Processing payment...'),
-              ],
-            ),
+  Future<void> _handleRazorpayPaymentSuccess(PaymentSuccessResponse response) async {
+    // Show local processing dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: Colors.brown.shade800),
+              const SizedBox(height: 16),
+              const Text('Finalizing order...'),
+            ],
           ),
         ),
-      );
+      ),
+    );
 
+    try {
       final userData = UserData();
       final user = userData.getCurrentUser();
 
-      if (user == null || !user.isLoggedIn) {
-        if (!mounted) return;
+      if (user == null) {
         Navigator.pop(context);
-        _showLoginRequiredDialog();
         return;
       }
 
-      if (totalAmount <= 0 || grandTotal <= 0) {
-        if (!mounted) return;
-        Navigator.pop(context);
-        _showErrorMessage('Invalid order amount');
-        return;
-      }
+      // -----------------------------------------------------------
+      // STEP 1: Execute Redemption API (if applied locally)
+      // -----------------------------------------------------------
+      if (_isRedemptionApplied && _pointsToRedeem > 0) {
+        final itemIds = cartItems.map((c) => c.itemId).where((s) => s.isNotEmpty).toList();
 
+        final redeemResp = await WalletApiService.redeemPoints(
+          customerId: user.id ?? '',
+          spendAmount: totalAmount.toInt(),
+          itemIds: itemIds,
+          token: user.token,
+        );
+
+        // Note: If redemption fails here, we still proceed with the order
+        // because the user has already paid via Razorpay.
+        // You might want to log this failure or flag the order for support.
+        if (redeemResp['success'] != true) {
+          print("WARNING: Payment successful but Point Redemption failed: ${redeemResp['message']}");
+        }
+      }
+      // -----------------------------------------------------------
+
+      // STEP 2: Create Order
       final orderResponse = await OrderService.createOrder(
         customerName: user.name ?? 'Customer',
         phoneNumber: user.phone ?? '',
@@ -2485,7 +2659,7 @@ class _CartScreenState extends State<CartScreen> {
         state: _stateController.text.trim(),
         postalCode: _postalCodeController.text.trim(),
         locationLink: _locationController.text.trim(),
-        discountApplied: couponDiscountAmount,
+        discountApplied: couponDiscountAmount + (_isRedemptionApplied ? _calculatedRedemptionDiscount : 0),
         couponCode: selectedCoupon?.code,
         couponDiscount: couponDiscountAmount,
         deliverySlotId: selectedSlotId,
@@ -2496,7 +2670,7 @@ class _CartScreenState extends State<CartScreen> {
         processingFee: handlingFee,
         tip: selectedTip,
         donation: selectedDonation,
-        totalAmount: grandTotal,
+        totalAmount: grandTotal, // Uses updated getter
         paymentMethod: 'Online',
         paymentStatus: 'Paid',
         tax: 0.0,
@@ -2506,32 +2680,12 @@ class _CartScreenState extends State<CartScreen> {
       );
 
       if (!mounted) return;
-      Navigator.pop(context);
+      Navigator.pop(context); // Close processing dialog
 
-      List<dynamic> unavailableItemsList = orderResponse['unavailable'] ?? [];
-
-      if (unavailableItemsList.isNotEmpty) {
-        await _showOutOfStockDialog(
-          unavailableItemsList.cast<Map<String, dynamic>>(),
-        );
-
-        if (mounted) {
-          setState(() {
-            _isProcessingPayment = false;
-          });
-        }
-
-        _showErrorMessage(
-          'Item(s) out of stock! Your payment was successful, please contact support for a refund.',
-        );
-      } else if (orderResponse['success'] == true ||
-          orderResponse['data'] != null) {
-        final orderData =
-            orderResponse['data'] ?? orderResponse['order'] ?? orderResponse;
-        _lastOrderId =
-            orderData['_id']?.toString() ?? orderData['id']?.toString();
-        _lastOrderNumber = orderData['orderNumber']?.toString() ??
-            'ORD${DateTime.now().millisecondsSinceEpoch}';
+      if (orderResponse['success'] == true || orderResponse['data'] != null) {
+        final orderData = orderResponse['data'] ?? orderResponse['order'] ?? orderResponse;
+        _lastOrderId = orderData['_id']?.toString() ?? orderData['id']?.toString();
+        _lastOrderNumber = orderData['orderNumber']?.toString() ?? 'ORD${DateTime.now().millisecondsSinceEpoch}';
 
         if (_lastOrderId != null) {
           await OrderService.sendPaymentConfirmation(
@@ -2541,34 +2695,21 @@ class _CartScreenState extends State<CartScreen> {
           );
         }
 
-        if (!mounted) return;
         await _showSuccessDialog();
         await loadCart();
+        fetchWalletBalance();
       } else {
         String errorMsg = _extractErrorMessage(orderResponse);
         _showErrorMessage('Order placement failed: $errorMsg');
-
-        if (mounted) {
-          setState(() {
-            _isProcessingPayment = false;
-          });
-        }
+        // Note: Payment succeeded but order creation failed.
+        // In a real app, this should trigger a "Help/Support" flow.
       }
     } catch (e) {
-      if (!mounted) return;
-      Navigator.pop(context);
-
-      String errorMsg = e.toString().replaceAll('Exception: ', '');
-
-      _showErrorMessage('Failed to complete order: $errorMsg');
-
-      if (mounted) {
-        setState(() {
-          _isProcessingPayment = false;
-        });
-      }
+      if (mounted) Navigator.pop(context);
+      _showErrorMessage('Failed to complete order: $e');
     }
   }
+
 
   Widget _buildPopupPriceSummary() {
     return PriceSummaryWidget(
@@ -2605,55 +2746,49 @@ class _CartScreenState extends State<CartScreen> {
     }
 
     setModalState(() => _isCheckoutLoading = true);
-
     bool isPopping = false;
 
     try {
       final userData = UserData();
       final user = userData.getCurrentUser();
 
-      if (user == null ||
-          !user.isLoggedIn ||
-          user.token == null ||
-          user.token!.isEmpty) {
+      if (user == null || !user.isLoggedIn || user.token == null) {
         if (!mounted) return;
         Navigator.pop(context);
         _showLoginRequiredDialog();
         return;
       }
 
-      if (cartItems.isEmpty) {
-        _showErrorMessage('Your cart is empty');
-        return;
-      }
+      // -----------------------------------------------------------
+      // STEP 1: Execute Redemption API (if applied locally)
+      // -----------------------------------------------------------
+      if (_isRedemptionApplied && _pointsToRedeem > 0) {
+        final itemIds = cartItems.map((c) => c.itemId).where((s) => s.isNotEmpty).toList();
 
-      final warehouseId = user.selectedWarehouseId;
-
-      if (warehouseId == null || warehouseId.isEmpty) {
-        _showErrorMessage(
-          'Warehouse not assigned. Please check your delivery location.',
+        // Note: Using the WalletApiService.redeemPoints method
+        final redeemResp = await WalletApiService.redeemPoints(
+          customerId: user.id ?? '',
+          spendAmount: totalAmount.toInt(),
+          itemIds: itemIds,
+          token: user.token,
         );
-        setModalState(() => _isCheckoutLoading = false);
-        return;
-      }
 
-      if (totalAmount <= 0) {
-        _showErrorMessage('Cart total cannot be zero or negative');
-        setModalState(() => _isCheckoutLoading = false);
-        return;
+        if (redeemResp['success'] != true) {
+          setModalState(() => _isCheckoutLoading = false);
+          if (mounted) {
+            _showErrorMessage('Failed to redeem points: ${redeemResp['message'] ?? 'Unknown error'}. Please try again or remove redemption.');
+          }
+          return;
+        }
       }
+      // -----------------------------------------------------------
 
-      if (grandTotal <= 0) {
-        _showErrorMessage('Order total cannot be zero or negative');
-        setModalState(() => _isCheckoutLoading = false);
-        return;
-      }
-
+      // STEP 2: Create Order
       final orderResponse = await OrderService.createOrder(
         customerName: user.name ?? 'Customer',
         phoneNumber: user.phone ?? '',
         email: user.email ?? '',
-        discountApplied: couponDiscountAmount,
+        discountApplied: couponDiscountAmount + (_isRedemptionApplied ? _calculatedRedemptionDiscount : 0),
         couponCode: selectedCoupon?.code,
         couponDiscount: couponDiscountAmount,
         houseNo: _houseNoController.text.trim(),
@@ -2670,7 +2805,7 @@ class _CartScreenState extends State<CartScreen> {
         processingFee: handlingFee,
         tip: selectedTip,
         donation: selectedDonation,
-        totalAmount: grandTotal,
+        totalAmount: grandTotal, // Uses the updated getter
         paymentMethod: 'COD',
         paymentStatus: 'Pending',
         tax: 0.0,
@@ -2678,40 +2813,27 @@ class _CartScreenState extends State<CartScreen> {
 
       if (!mounted) return;
 
-      if (orderResponse['success'] == true ||
-          orderResponse['data'] != null ||
-          orderResponse['order'] != null) {
+      if (orderResponse['success'] == true || orderResponse['data'] != null || orderResponse['order'] != null) {
         isPopping = true;
-
-        final orderData =
-            orderResponse['data'] ?? orderResponse['order'] ?? orderResponse;
-        _lastOrderId =
-            orderData['_id']?.toString() ?? orderData['id']?.toString();
-        _lastOrderNumber = orderData['orderNumber']?.toString() ??
-            'ORD${DateTime.now().millisecondsSinceEpoch}';
+        final orderData = orderResponse['data'] ?? orderResponse['order'] ?? orderResponse;
+        _lastOrderId = orderData['_id']?.toString() ?? orderData['id']?.toString();
+        _lastOrderNumber = orderData['orderNumber']?.toString() ?? 'ORD${DateTime.now().millisecondsSinceEpoch}';
 
         Navigator.pop(context);
         await _showSuccessDialog();
-
-        if (!mounted) return;
-        await loadCart();
+        if (mounted) await loadCart();
+        // Refresh wallet balance after successful order
+        fetchWalletBalance();
       } else {
-        List<dynamic> unavailableItemsList = orderResponse['unavailable'] ?? [];
+        // Handle failure
+        // If order fails but points were redeemed, this is an edge case.
+        // Ideally, the backend should handle rollback, or we fail gracefully here.
 
+        List<dynamic> unavailableItemsList = orderResponse['unavailable'] ?? [];
         if (unavailableItemsList.isNotEmpty) {
           isPopping = true;
-
           if (mounted) Navigator.pop(context);
-
-          await _showOutOfStockDialog(
-            unavailableItemsList.cast<Map<String, dynamic>>(),
-          );
-
-          if (mounted) {
-            setState(() {
-              _isCheckoutLoading = false;
-            });
-          }
+          await _showOutOfStockDialog(unavailableItemsList.cast<Map<String, dynamic>>());
         } else {
           String errorMsg = _extractErrorMessage(orderResponse);
           if (mounted) {
@@ -2722,50 +2844,9 @@ class _CartScreenState extends State<CartScreen> {
         }
       }
     } catch (e) {
-      if (!mounted) return;
-
-      String errorMsg = e.toString().replaceAll('Exception: ', '');
-
-      if (errorMsg.contains('Session expired') ||
-          errorMsg.contains('Unauthorized') ||
-          errorMsg.contains('Please login')) {
-        Navigator.pop(context);
-        _showLoginRequiredDialog();
-      } else if (errorMsg.contains('Warehouse') &&
-          errorMsg.contains('not assigned')) {
-        _showErrorMessage('Please set your delivery location first');
-      } else if (errorMsg.contains('"unavailable":') &&
-          errorMsg.contains('"success":false')) {
-        try {
-          isPopping = true;
-
-          final jsonString = errorMsg.substring(errorMsg.indexOf('{'));
-          final errorJson = json.decode(jsonString) as Map<String, dynamic>;
-
-          List<dynamic> unavailableItemsList = errorJson['unavailable'] ?? [];
-          if (mounted) Navigator.pop(context);
-          await _showOutOfStockDialog(
-            unavailableItemsList.cast<Map<String, dynamic>>(),
-          );
-
-          if (mounted) {
-            setState(() {
-              _isCheckoutLoading = false;
-            });
-          }
-        } catch (parseError) {
-          isPopping = true;
-          Navigator.pop(context);
-          _showFailureDialog('Order Failed', message: errorMsg);
-        }
-      } else {
-        isPopping = true;
-        Navigator.pop(context);
-        _showFailureDialog('Order Failed', message: errorMsg);
-      }
-    } finally {
       if (mounted && !isPopping) {
         setModalState(() => _isCheckoutLoading = false);
+        _showErrorMessage('Error: ${e.toString()}');
       }
     }
   }
@@ -3366,34 +3447,23 @@ class _CartScreenState extends State<CartScreen> {
                                   Expanded(
                                     flex: 2,
                                     child: ElevatedButton.icon(
-                                      onPressed: cartItems.isEmpty ||
-                                          _isRedeeming
+                                      onPressed: cartItems.isEmpty || _isRedeeming
                                           ? null
-                                          : () => _redeemNow(),
+                                      // CHANGE HERE: Call the local calculation method
+                                          : () => _calculateAndApplyRedemption(),
                                       icon: _isRedeeming
                                           ? const SizedBox(
                                         width: 18,
                                         height: 18,
-                                        child:
-                                        CircularProgressIndicator(
+                                        child: CircularProgressIndicator(
                                           strokeWidth: 2,
-                                          valueColor:
-                                          AlwaysStoppedAnimation<
-                                              Color>(
-                                              Colors.white),
+                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                         ),
                                       )
-                                          : const Icon(
-                                        Icons.card_giftcard,
-                                        size: 20,
-                                      ),
+                                          : const Icon(Icons.card_giftcard, size: 20),
                                       label: Text(
-                                        _isRedeeming
-                                            ? 'Redeeming...'
-                                            : 'Redeem',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                        _isRedeeming ? 'Redeeming...' : 'Redeem',
+                                        style: const TextStyle(fontWeight: FontWeight.w600),
                                       ),
                                       style: ElevatedButton.styleFrom(
                                         foregroundColor: Colors.white,
@@ -3430,7 +3500,7 @@ class _CartScreenState extends State<CartScreen> {
                               handlingFeeName: handlingFeeName,
                               selectedTip: selectedTip,
                               selectedDonation: selectedDonation,
-                              grandTotal: grandTotal,
+                              grandTotal: grandTotal + (_lastDiscountAmount ?? 0),
                               isFreeDelivery: isFreeDelivery,
                               thresholdMessage: thresholdMessage,
                               thresholdAmount: thresholdAmount,
@@ -4578,7 +4648,7 @@ class _CartScreenState extends State<CartScreen> {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  'Checkout (₹${(grandTotal - (_lastDiscountAmount ?? 0)).toStringAsFixed(2)})',
+                  'Checkout (₹${grandTotal.toStringAsFixed(2)})',
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,

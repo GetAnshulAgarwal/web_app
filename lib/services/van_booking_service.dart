@@ -26,7 +26,7 @@ class VanBookingService {
 
       // Balaji: Check if user is authenticated
       if (token == null || token.isEmpty) {
-        print('❌ [VanBooking] No authentication token found');
+        print(' [VanBooking] No authentication token found');
         return [];
       }
 
@@ -39,7 +39,7 @@ class VanBookingService {
         },
       );
 
-      print('📡 [VanBooking] API Response Status: ${response.statusCode}');
+      print(' [VanBooking] API Response Status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final dynamic responseData = json.decode(response.body);
@@ -63,35 +63,35 @@ class VanBookingService {
         // Balaji: Filter bookings to show completed, delivered, done, and cancelled bookings
         // Convert to List<Map<String, dynamic>> and filter by status
         final List<Map<String, dynamic>> allBookings =
-            bookings.map((booking) => booking as Map<String, dynamic>).toList();
+        bookings.map((booking) => booking as Map<String, dynamic>).toList();
 
         final filteredBookings =
-            allBookings.where((booking) {
-              final status = booking['status']?.toString().toLowerCase() ?? '';
-              return status == 'completed' ||
-                  status == 'delivered' ||
-                  status == 'done' ||
-                  status == 'cancelled';
-            }).toList();
+        allBookings.where((booking) {
+          final status = booking['status']?.toString().toLowerCase() ?? '';
+          return status == 'completed' ||
+              status == 'delivered' ||
+              status == 'done' ||
+              status == 'cancelled';
+        }).toList();
 
         final detailedBookingFutures =
-            filteredBookings.map((booking) {
-              // prefer _id, fall back to id; if neither exists produce a null future
-              final id = booking['_id'] ?? booking['id'];
-              if (id == null) return Future<Map<String, dynamic>?>.value(null);
-              return getBookingDetails(id.toString());
-            }).toList();
+        filteredBookings.map((booking) {
+          // prefer _id, fall back to id; if neither exists produce a null future
+          final id = booking['_id'] ?? booking['id'];
+          if (id == null) return Future<Map<String, dynamic>?>.value(null);
+          return getBookingDetails(id.toString());
+        }).toList();
 
         // Await all detail fetches and filter out any null results
         final detailedBookingResults = await Future.wait(
           detailedBookingFutures,
         );
         final detailedBookings =
-            detailedBookingResults.whereType<Map<String, dynamic>>().toList();
+        detailedBookingResults.whereType<Map<String, dynamic>>().toList();
 
         if (detailedBookings.isNotEmpty) {
           print(
-            '✅ [VanBooking] Fetched detailed info for ${detailedBookings.length} bookings',
+            ' [VanBooking] Fetched detailed info for ${detailedBookings.length} bookings',
           );
 
           print(detailedBookings);
@@ -99,31 +99,30 @@ class VanBookingService {
         }
 
         print(
-          '✅ [VanBooking] Found ${filteredBookings.length} finished bookings out of ${allBookings.length} total',
+          ' [VanBooking] Found ${filteredBookings.length} finished bookings out of ${allBookings.length} total',
         );
         return filteredBookings;
       } else {
         print(
-          '❌ [VanBooking] API Error: ${response.statusCode} - ${response.body}',
+          ' [VanBooking] API Error: ${response.statusCode} - ${response.body}',
         );
         return [];
       }
     } catch (e) {
-      print('❌ [VanBooking] Exception occurred: $e');
+      print(' [VanBooking] Exception occurred: $e');
       return [];
     }
   }
 
-  // Balaji: Fetch detailed information for a specific booking
-  // Takes bookingId as parameter and returns booking details
+
   static Future<Map<String, dynamic>?> getBookingDetails(
-    String bookingId,
-  ) async {
+      String bookingId,
+      ) async {
     try {
       final token = await _getToken();
 
       if (token == null || token.isEmpty) {
-        print('❌ [VanBooking] No authentication token found');
+        print('[VanBooking] No authentication token found');
         return null;
       }
 
@@ -143,8 +142,6 @@ class VanBookingService {
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
 
-        // Balaji: Extract booking details from response
-        // Handle different response formats
         if (data['booking'] != null) {
           return data['booking'] as Map<String, dynamic>;
         } else if (data['data'] != null) {
@@ -153,11 +150,11 @@ class VanBookingService {
           return data;
         }
       } else {
-        print('❌ [VanBooking] Details API Error: ${response.statusCode}');
+        print('[VanBooking] Details API Error: ${response.statusCode}');
         return null;
       }
     } catch (e) {
-      print('❌ [VanBooking] Details Exception: $e');
+      print(' [VanBooking] Details Exception: $e');
       return null;
     }
   }

@@ -1,8 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 class ChatApiService {
   static const String baseUrl = 'https://pos.inspiredgrow.in/vps/api/chat';
+  static const String returnsBaseUrl = 'https://pos.inspiredgrow.in/vps/returns';
+
   static final ChatApiService _instance = ChatApiService._internal();
   factory ChatApiService() => _instance;
   ChatApiService._internal();
@@ -11,12 +15,8 @@ class ChatApiService {
 
   void setToken(String token) {
     _jwtToken = token.trim();
-    print('Token set: $_jwtToken');
   }
 
-  String? get token => _jwtToken;
-
-  // Build headers with optional content-type; Authorization included only when token set
   Map<String, String> _buildHeaders({bool withContentType = false}) {
     final headers = <String, String>{};
     if (withContentType) headers['Content-Type'] = 'application/json';
@@ -24,207 +24,235 @@ class ChatApiService {
     return headers;
   }
 
-  Future<Map<String, dynamic>> startOrRetrieveConversation(
-    String otherUserId,
-  ) async {
-    print('');
-    print('📞 [ChatAPI] ========================================');
-    print('📞 [ChatAPI] Starting conversation');
-    print('📞 [ChatAPI] URL: $baseUrl/conversations');
-    print('📞 [ChatAPI] Other User ID: $otherUserId');
-    print('📞 [ChatAPI] ========================================');
-    print('📞[ChatAPI] Using Token: $_jwtToken');
-
+  Future<Map<String, dynamic>> startOrRetrieveConversation(String otherUserId) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/conversations'),
         headers: _buildHeaders(withContentType: true),
         body: json.encode({'otherUserId': otherUserId}),
       );
-
-      print('📥 [ChatAPI] Response Status: ${response.statusCode}');
-      print('📥 [ChatAPI] Response Body: ${response.body}');
-
       if (response.statusCode == 200) {
-        final data = json.decode(response.body)['data'];
-        print('✅ [ChatAPI] Conversation established successfully');
-        print('✅ [ChatAPI] Conversation ID: ${data['_id']}');
-        return data;
+        return json.decode(response.body)['data'];
       } else {
-        print('❌ [ChatAPI] Failed to start conversation');
-        print('❌ [ChatAPI] Status: ${response.statusCode}');
-        print('❌ [ChatAPI] Body: ${response.body}');
         throw Exception('Failed to start conversation: ${response.statusCode}');
       }
-    } catch (e, stackTrace) {
-      print('❌ [ChatAPI] Exception in startOrRetrieveConversation: $e');
-      print('📍 [ChatAPI] Stack trace: $stackTrace');
+    } catch (e) {
       rethrow;
     }
   }
 
-  Future<List<dynamic>> getMessages(
-    String conversationId, {
-    int limit = 50,
-    String? before,
-  }) async {
-    print('');
-    print('📨 [ChatAPI] ========================================');
-    print('📨 [ChatAPI] Fetching messages');
-    print('📨 [ChatAPI] Conversation ID: $conversationId');
-    print('📨 [ChatAPI] Limit: $limit');
-    if (before != null) print('📨 [ChatAPI] Before: $before');
-    print('📨 [ChatAPI] ========================================');
-
+  Future<List<dynamic>> getMessages(String conversationId, {int limit = 50, String? before}) async {
     try {
-      final queryParams = {
-        'limit': limit.toString(),
-        if (before != null) 'before': before,
-      };
-
-      final uri = Uri.parse(
-        '$baseUrl/conversations/$conversationId/messages',
-      ).replace(queryParameters: queryParams);
-      print('🌐 [ChatAPI] Request URL: $uri');
-
+      final queryParams = {'limit': limit.toString(), if (before != null) 'before': before};
+      final uri = Uri.parse('$baseUrl/conversations/$conversationId/messages').replace(queryParameters: queryParams);
       final response = await http.get(uri, headers: _buildHeaders());
-
-      print('📥 [ChatAPI] Response Status: ${response.statusCode}');
-      print('📥 [ChatAPI] Response Body: ${response.body}');
-
       if (response.statusCode == 200) {
-        final messages = json.decode(response.body)['data'] as List;
-        print('✅ [ChatAPI] Loaded ${messages.length} messages');
-
-        // Print first few messages for debugging
-        for (int i = 0; i < messages.length && i < 3; i++) {
-          final msg = messages[i];
-          print(
-            '   📝 Message ${i + 1}: ${msg['_id']} - ${msg['body']?.substring(0, msg['body'].length > 50 ? 50 : msg['body'].length)}...',
-          );
-        }
-
-        return messages;
+        return json.decode(response.body)['data'] as List;
       } else {
-        print('❌ [ChatAPI] Failed to load messages');
-        print('❌ [ChatAPI] Status: ${response.statusCode}');
-        print('❌ [ChatAPI] Body: ${response.body}');
-        throw Exception('Failed to load messages: ${response.statusCode}');
+        throw Exception('Failed to load messages');
       }
-    } catch (e, stackTrace) {
-      print('❌ [ChatAPI] Exception in getMessages: $e');
-      print('📍 [ChatAPI] Stack trace: $stackTrace');
+    } catch (e) {
       rethrow;
     }
   }
 
-  Future<Map<String, dynamic>> sendMessage(
-    String conversationId,
-    String body,
-  ) async {
-    print('');
-    print('📤 [ChatAPI] ========================================');
-    print('📤 [ChatAPI] Sending message');
-    print('📤 [ChatAPI] URL: $baseUrl/messages');
-    print('📤 [ChatAPI] Conversation ID: $conversationId');
-    print('📤 [ChatAPI] Message Body: $body');
-    print('📤 [ChatAPI] ========================================');
-
+  Future<Map<String, dynamic>> sendMessage(String conversationId, String body) async {
     try {
-      final requestBody = json.encode({
-        'conversationId': conversationId,
-        'body': body,
-      });
-
-      print('📦 [ChatAPI] Request Body: $requestBody');
-
+      final requestBody = json.encode({'conversationId': conversationId, 'body': body});
       final response = await http.post(
         Uri.parse('$baseUrl/messages'),
         headers: _buildHeaders(withContentType: true),
         body: requestBody,
       );
-
-      print('📥 [ChatAPI] Response Status: ${response.statusCode}');
-      print('📥 [ChatAPI] Response Body: ${response.body}');
-
-      if (response.statusCode == 201) {
-        final data = json.decode(response.body)['data'];
-        print('✅ [ChatAPI] Message sent successfully');
-        print('✅ [ChatAPI] Message ID: ${data['_git id']}');
-        return data;
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        return json.decode(response.body)['data'];
       } else {
-        print('❌ [ChatAPI] Failed to send message');
-        print('❌ [ChatAPI] Status: ${response.statusCode}');
-        print('❌ [ChatAPI] Body: ${response.body}');
-        throw Exception('Failed to send message: ${response.statusCode}');
+        throw Exception('Failed to send message');
       }
-    } catch (e, stackTrace) {
-      print('❌ [ChatAPI] Exception in sendMessage: $e');
-      print('📍 [ChatAPI] Stack trace: $stackTrace');
+    } catch (e) {
       rethrow;
     }
   }
 
-  Future<void> markMessageAsRead(String messageId) async {
-    print('');
-    print('✓ [ChatAPI] ========================================');
-    print('✓ [ChatAPI] Marking message as read');
-    print('✓ [ChatAPI] Message ID: $messageId');
-    print('✓ [ChatAPI] ========================================');
-
+  // --- STANDARD CHAT UPLOAD (Fallback) ---
+  Future<Map<String, dynamic>> sendImageMessage(String conversationId, File imageFile, {String? caption}) async {
+    print('📤 [ChatAPI] Sending Chat Image...');
     try {
-      final response = await http.patch(
-        Uri.parse('$baseUrl/messages/$messageId/read'),
-        headers: _buildHeaders(),
+      var uri = Uri.parse('$baseUrl/messages');
+      var request = http.MultipartRequest('POST', uri);
+
+      request.headers.addAll({
+        'Authorization': 'Bearer ${_jwtToken ?? ''}',
+      });
+
+      // Fields MUST be added before files for some server parsers
+      // We send 'conversationId' to match the JSON endpoint key expected by the controller
+      request.fields['conversationId'] = conversationId;
+      request.fields['body'] = caption ?? 'Image Attachment';
+
+      var stream = http.ByteStream(imageFile.openRead());
+      var length = await imageFile.length();
+
+      var multipartFile = http.MultipartFile(
+        'image',
+        stream,
+        length,
+        filename: imageFile.path.split('/').last,
+        contentType: MediaType('image', 'jpeg'),
       );
 
-      print('📥 [ChatAPI] Response Status: ${response.statusCode}');
+      request.files.add(multipartFile);
 
-      if (response.statusCode == 200) {
-        print('✅ [ChatAPI] Message marked as read successfully');
+      var streamedResponse = await request.send();
+      var response = await http.Response.fromStream(streamedResponse);
+
+      print('📥 [ChatAPI] Chat Image Status: ${response.statusCode}');
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        return json.decode(response.body)['data'];
       } else {
-        print('❌ [ChatAPI] Failed to mark message as read');
-        print('❌ [ChatAPI] Status: ${response.statusCode}');
-        print('❌ [ChatAPI] Body: ${response.body}');
-        throw Exception(
-          'Failed to mark message as read: ${response.statusCode}',
-        );
+        throw Exception('Upload failed: ${response.statusCode} - ${response.body}');
       }
-    } catch (e, stackTrace) {
-      print('❌ [ChatAPI] Exception in markMessageAsRead: $e');
-      print('📍 [ChatAPI] Stack trace: $stackTrace');
+    } catch (e) {
+      print('❌ [ChatAPI] Chat Upload Error: $e');
       rethrow;
     }
+  }
+
+  // --- NEW: RETURN IMAGE UPLOAD (Correct Endpoint) ---
+// --- FIXED: "Smart" Upload that tries multiple field names ---
+  Future<Map<String, dynamic>> uploadReturnImage(String returnId, File imageFile) async {
+    print('🔍 [ChatAPI] Starting Smart Upload to: $returnsBaseUrl/$returnId/images');
+
+    // These are the most common keys backends expect. We try them one by one.
+    final possibleFieldNames = [
+      'images',      // Common for /images endpoint
+      'file',        // Standard singular
+      'files',       // Standard plural
+      'image',       // Common singular
+      'attachment',  // Common for support
+      'evidence'     // Specific to returns
+    ];
+
+    for (final fieldName in possibleFieldNames) {
+      print('🔄 [ChatAPI] Trying field name: "$fieldName"...');
+
+      try {
+        var uri = Uri.parse('$returnsBaseUrl/$returnId/images');
+        var request = http.MultipartRequest('POST', uri);
+
+        request.headers.addAll({
+          'Authorization': 'Bearer ${_jwtToken ?? ''}',
+          // Do NOT set Content-Type here; MultipartRequest sets it automatically
+        });
+
+        var stream = http.ByteStream(imageFile.openRead());
+        var length = await imageFile.length();
+
+        var multipartFile = http.MultipartFile(
+          fieldName, // <--- Using the current guess from our list
+          stream,
+          length,
+          filename: imageFile.path.split('/').last,
+          contentType: MediaType('image', 'jpeg'),
+        );
+
+        request.files.add(multipartFile);
+
+        var streamedResponse = await request.send();
+        var response = await http.Response.fromStream(streamedResponse);
+
+        // If specific failure "Unexpected field", we continue to the next key
+        if (response.statusCode == 500 && response.body.contains("Unexpected field")) {
+          print('❌ Field "$fieldName" rejected. Trying next...');
+          continue;
+        }
+
+        // If success
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          print('✅ SUCCESS! The correct field name is: "$fieldName"');
+          final body = json.decode(response.body);
+          return body['data'] ?? body;
+        }
+
+        // If other error (not field name related), throw it
+        print('❌ Upload failed with status ${response.statusCode}: ${response.body}');
+        throw Exception('Upload failed: ${response.statusCode}');
+
+      } catch (e) {
+        // If it's the last attempt, rethrow the error
+        if (fieldName == possibleFieldNames.last) {
+          print('❌ All field names failed. Last error: $e');
+          rethrow;
+        }
+      }
+    }
+
+    throw Exception('Unable to determine correct upload field name');
   }
 
   Future<void> markAllMessagesAsRead(String conversationId) async {
-    print('');
-    print('✓✓ [ChatAPI] ========================================');
-    print('✓✓ [ChatAPI] Marking all messages as read');
-    print('✓✓ [ChatAPI] Conversation ID: $conversationId');
-    print('✓✓ [ChatAPI] ========================================');
-
     try {
-      final response = await http.patch(
-        Uri.parse('$baseUrl/conversations/$conversationId/readAll'),
-        headers: _buildHeaders(),
+      await http.patch(Uri.parse('$baseUrl/conversations/$conversationId/readAll'), headers: _buildHeaders());
+    } catch (e) {
+      print('Error marking read: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> createReturnRequest({
+    required String orderId,
+    required String itemId,
+    String reason = "Damaged item received",
+    String notes = "Packaging was open",
+  }) async {
+    try {
+      final requestBody = json.encode({
+        "orderId": orderId,
+        "itemId": itemId,
+        "reason": reason,
+        "notes": notes
+      });
+
+      final response = await http.post(
+        Uri.parse('$returnsBaseUrl/request'),
+        headers: _buildHeaders(withContentType: true),
+        body: requestBody,
       );
 
-      print('📥 [ChatAPI] Response Status: ${response.statusCode}');
+      final body = json.decode(response.body);
 
-      if (response.statusCode == 200) {
-        print('✅ [ChatAPI] All messages marked as read successfully');
-      } else {
-        print('❌ [ChatAPI] Failed to mark all messages as read');
-        print('❌ [ChatAPI] Status: ${response.statusCode}');
-        print('❌ [ChatAPI] Body: ${response.body}');
-        throw Exception(
-          'Failed to mark all messages as read: ${response.statusCode}',
-        );
+      // SUCCESS: Created new return
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        if (body['success'] == true) {
+          // Handle case where data might be a list or a map
+          if (body['data'] is List && (body['data'] as List).isNotEmpty) {
+            return body['data'][0];
+          }
+          return body['data'];
+        } else {
+          throw Exception(body['message']);
+        }
       }
-    } catch (e, stackTrace) {
-      print('❌ [ChatAPI] Exception in markAllMessagesAsRead: $e');
-      print('📍 [ChatAPI] Stack trace: $stackTrace');
+      // CONFLICT: Return ALREADY EXISTS (Error 409)
+      else if (response.statusCode == 409) {
+        print("⚠️ [ChatAPI] Return already exists.");
+
+        // Smart Handling: If the server returns the EXISTING return data, use it!
+        if (body['data'] != null) {
+          if (body['data'] is List && (body['data'] as List).isNotEmpty) {
+            return body['data'][0];
+          }
+          return body['data'];
+        }
+
+        // If no data, throw specific flag
+        throw Exception("RETURN_EXISTS");
+      }
+      // OTHER ERRORS
+      else {
+        throw Exception(body['message'] ?? 'Return request failed: ${response.statusCode}');
+      }
+    } catch (e) {
       rethrow;
     }
   }

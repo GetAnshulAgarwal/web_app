@@ -55,6 +55,8 @@ dependencies:
   package_info_plus:
   url_launcher:
   flutter_cache_manager:
+  image_picker:
+  http_parser:
 
 dev_dependencies:
   flutter_test:

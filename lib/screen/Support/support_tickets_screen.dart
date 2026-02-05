@@ -1,14 +1,6 @@
-// support_tickets_screen.dart
-
 import 'package:flutter/material.dart';
-
-
-// --- IMPORT YOUR NEW FILES ---
-import '../../authentication/login_screen_authentication.dart'; // Make sure this path is correct
 import '../../authentication/user_data.dart';
-// ---
-
-import '../../utils/date_formatter.dart';
+import '../../Utils/date_formatter.dart';
 import '../../model/Support/support_ticket.dart';
 import '../../services/Support/support_api_service.dart';
 import '../ProfileSubScreen/help_and_support_screen.dart';
@@ -23,7 +15,6 @@ class _SupportTicketsScreenState extends State<SupportTicketsScreen> {
   List<SupportTicket> tickets = [];
   bool isLoading = true;
 
-  // We need an instance of UserData to get the token
   final UserData _userData = UserData();
 
   @override
@@ -33,7 +24,6 @@ class _SupportTicketsScreenState extends State<SupportTicketsScreen> {
   }
 
   void _loadTickets() async {
-    // Ensure the widget is still mounted before proceeding
     if (!mounted) return;
 
     setState(() {
@@ -41,7 +31,6 @@ class _SupportTicketsScreenState extends State<SupportTicketsScreen> {
     });
 
     try {
-      // --- NEW: PROACTIVE TOKEN CHECK ---
       final String? currentToken = _userData.getToken();
 
       /*if (currentToken == null || JwtUtils.isTokenExpired(currentToken)) {
@@ -61,9 +50,9 @@ class _SupportTicketsScreenState extends State<SupportTicketsScreen> {
         );
         return; // Stop the function here
       }*/
-      // --- END OF TOKEN CHECK ---
 
       // If we are here, the token is valid. Proceed to fetch tickets.
+      // --- END OF TOKEN CHECK ---
       final loadedTickets = await SupportApiService.getSupportTickets();
 
       if (mounted) {
@@ -73,8 +62,6 @@ class _SupportTicketsScreenState extends State<SupportTicketsScreen> {
         });
       }
     } catch (e) {
-      // This will now only catch other errors, like network issues,
-      // because the 401/expired token error is already handled above.
       if (mounted) {
         setState(() {
           isLoading = false;

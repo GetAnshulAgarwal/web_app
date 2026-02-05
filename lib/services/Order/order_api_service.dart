@@ -8,7 +8,8 @@ import '../warehouse/warehouse_service.dart';
 class OrderService {
   static const String baseUrl = 'https://pos.inspiredgrow.in/vps';
   static final UserData _userData = UserData();
-  static final OrderNotificationManager _notificationManager = OrderNotificationManager();
+  static final OrderNotificationManager _notificationManager =
+  OrderNotificationManager();
 
   static Map<String, String> _getHeaders() {
     final token = _userData.getToken();
@@ -19,30 +20,42 @@ class OrderService {
     };
   }
 
-  // ---
-  // --- UPDATED createOrder METHOD SIGNATURE ---
-  // ---
+  // Helper to extract date from MongoDB Extended JSON format { "$date": "..." }
+  static String _extractDateString(dynamic dateVal) {
+    if (dateVal == null) return '';
+
+    // If it's already a string (e.g. "2026-01-01..."), just return it
+    if (dateVal is String) return dateVal;
+
+    // If it's a Map (e.g. { "$date": "..." }), extract the inner string
+    if (dateVal is Map) {
+      if (dateVal.containsKey('\$date')) {
+        return dateVal['\$date']?.toString() ?? '';
+      }
+      // Handle rare case of { "date": "..." }
+      if (dateVal.containsKey('date')) {
+        return dateVal['date']?.toString() ?? '';
+      }
+    }
+
+    return dateVal.toString();
+  }
+
   static Future<Map<String, dynamic>> createOrder({
-    // Customer Info
     required String customerName,
     required String phoneNumber,
     required String email,
-    // Address Info
     required String houseNo,
     required String area,
     required String city,
     required String state,
     required String postalCode,
     required String locationLink,
-    // Delivery Info
     String? deliverySlotId,
     Map<String, dynamic>? deliverySlotInfo,
     bool isInstantDelivery = false,
     String? assignTo,
-
     String? warehouseId,
-
-    // Price and payment parameters
     required double subtotal,
     required double deliveryCharge,
     required double processingFee,
@@ -53,33 +66,26 @@ class OrderService {
     required String paymentStatus,
     required double tax,
     required double discountApplied,
-
-    // --- NEW COUPON PARAMS ---
     String? couponCode,
     double couponDiscount = 0.0,
-
-    // Razorpay (optional)
     String? razorpayPaymentId,
     String? razorpayOrderId,
     String? razorpaySignature,
   }) async {
     try {
-      print('=== CREATING ORDER (2-STEP PROCESS) ===');
-      print('Delivery Type: ${isInstantDelivery ? 'Instant' : 'Scheduled'}');
-
-      // 🔧 FIXED: Get warehouseId from user if not provided
       if (warehouseId == null) {
         final userData = UserData();
         final user = userData.getCurrentUser();
         warehouseId = user?.selectedWarehouseId;
-        print('🏪 Using user\'s assigned warehouse: $warehouseId');
+        print(' Using user\'s assigned warehouse: $warehouseId');
       } else {
-        print('🏪 Using provided warehouse: $warehouseId');
+        print(' Using provided warehouse: $warehouseId');
       }
 
-      // Validate warehouseId exists
       if (warehouseId == null || warehouseId.isEmpty) {
-        throw Exception('Warehouse ID is required. Please check your delivery location.');
+        throw Exception(
+          'Warehouse ID is required. Please check your delivery location.',
+        );
       }
 
       if (!isInstantDelivery && deliverySlotId != null) {
@@ -100,18 +106,17 @@ class OrderService {
               checkoutSession['id']?.toString();
 
       if (checkoutSessionId == null) {
-        print('❌ Checkout session structure: ${checkoutSession.keys}');
+        print(' Checkout session structure: ${checkoutSession.keys}');
         if (checkoutSession['data'] != null) {
-          print('❌ Data structure: ${checkoutSession['data'].keys}');
+          print(' Data structure: ${checkoutSession['data'].keys}');
         }
         throw Exception('No checkout session ID returned');
       }
 
-      print('✅ Using checkout session ID: $checkoutSessionId');
+      print(' Using checkout session ID: $checkoutSessionId');
 
       final orderResult = await placeOrderFromSession(
         checkoutSessionId: checkoutSessionId,
-        // Pass all customer/address info
         customerName: customerName,
         phoneNumber: phoneNumber,
         email: email,
@@ -122,15 +127,10 @@ class OrderService {
         postalCode: postalCode,
         locationLink: locationLink,
         assignTo: assignTo,
-        // Pass delivery info
         deliverySlotId: deliverySlotId,
         deliverySlotInfo: deliverySlotInfo,
         isInstantDelivery: isInstantDelivery,
-
-        // 🔧 FIXED: Pass warehouseId
         warehouseId: warehouseId,
-
-        // Pass all price and payment info
         subtotal: subtotal,
         deliveryCharge: deliveryCharge,
         processingFee: processingFee,
@@ -141,17 +141,13 @@ class OrderService {
         paymentStatus: paymentStatus,
         tax: tax,
         discountApplied: discountApplied,
-
-        // --- NEW COUPON PARAMS ---
         couponCode: couponCode,
         couponDiscount: couponDiscount,
-
         razorpayPaymentId: razorpayPaymentId,
         razorpayOrderId: razorpayOrderId,
         razorpaySignature: razorpaySignature,
       );
 
-      // Send notification after successful order creation
       await _handleOrderPlacedNotification(orderResult, checkoutSession);
 
       return orderResult;
@@ -162,7 +158,155 @@ class OrderService {
     }
   }
 
-  // Handle order placed notification
+  static Future<Map<String, dynamic>> placeOrderFromSession({
+    required String checkoutSessionId,
+    required String customerName,
+    required String phoneNumber,
+    required String email,
+    required String houseNo,
+    required String area,
+    required String city,
+    required String state,
+    required String postalCode,
+    required String locationLink,
+    String? assignTo,
+    String? deliverySlotId,
+    Map<String, dynamic>? deliverySlotInfo,
+    bool isInstantDelivery = false,
+    required String warehouseId,
+    required double subtotal,
+    required double deliveryCharge,
+    required double processingFee,
+    required double tip,
+    required double donation,
+    required double totalAmount,
+    required String paymentMethod,
+    required String paymentStatus,
+    required double tax,
+    required double discountApplied,
+    String? couponCode,
+    double couponDiscount = 0.0,
+    String? razorpayPaymentId,
+    String? razorpayOrderId,
+    String? razorpaySignature,
+  }) async {
+    try {
+      print('=== PLACING ORDER FROM SESSION (CREATING ACTUAL ORDER) ===');
+      print(' Order Financial Details:');
+      print('   Total Amount: ₹$totalAmount');
+      print('   Coupon Code: $couponCode');
+      print('   Coupon Discount: ₹$couponDiscount');
+      print(' Store/Warehouse ID: $warehouseId');
+
+      final orderData = {
+        'checkoutSessionId': checkoutSessionId,
+        'customerName': customerName,
+        'phoneNumber': phoneNumber,
+        'email': email,
+        'country': 'India',
+        'state': state,
+        'city': city,
+        'houseNo': houseNo,
+        'area': area,
+        'postalCode': postalCode,
+        'locationLink': locationLink,
+        if (assignTo != null) 'assignTo': assignTo,
+        'store': warehouseId,
+        'subtotal': subtotal,
+        'deliveryCharge': deliveryCharge,
+        'processingFee': processingFee,
+        'tip': tip,
+        'donation': donation,
+        'totalAmount': totalAmount,
+        'grandTotal': totalAmount,
+        'tax': tax,
+        'discountApplied': discountApplied,
+        if (couponCode != null && couponCode.isNotEmpty)
+          'couponCode': couponCode,
+        'couponDiscount': couponDiscount,
+        'paymentMethod': paymentMethod,
+        'paymentStatus': paymentStatus,
+        if (razorpayPaymentId != null) 'razorpayPaymentId': razorpayPaymentId,
+        if (razorpayOrderId != null) 'razorpayOrderId': razorpayOrderId,
+        if (razorpaySignature != null) 'razorpaySignature': razorpaySignature,
+        'deliveryType': isInstantDelivery ? 'instant' : 'scheduled',
+        'isInstantDelivery': isInstantDelivery,
+        if (deliverySlotId != null) 'deliverySlotId': deliverySlotId,
+        if (deliverySlotInfo != null) 'deliverySlotInfo': deliverySlotInfo,
+        if (!isInstantDelivery && deliverySlotInfo != null) ...{
+          'scheduledDeliveryDate': deliverySlotInfo['date'],
+          'scheduledDeliveryTime':
+          deliverySlotInfo['timeRange'] ?? deliverySlotInfo['startTime'],
+          'deliverySlotDetails': {
+            'slotId': deliverySlotId,
+            'date': deliverySlotInfo['date'],
+            'startTime': deliverySlotInfo['startTime'],
+            'endTime': deliverySlotInfo['endTime'],
+            'displayText': deliverySlotInfo['displayText'],
+          },
+        },
+      };
+
+      print(' Request Body (with "store" field):');
+      print(jsonEncode(orderData));
+
+      final response = await http
+          .post(
+        Uri.parse('$baseUrl/api/orders/place-from-session'),
+        headers: _getHeaders(),
+        body: jsonEncode(orderData),
+      )
+          .timeout(const Duration(seconds: 30));
+
+      print('📥 Order placement response: ${response.statusCode}');
+      print('📥 Order placement body: ${response.body}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+
+        if (data['success'] == false) {
+          String failureReason =
+              data['error'] ?? data['message'] ?? 'Unknown error occurred';
+          print(' Order placement logic failure: $failureReason');
+          throw Exception(failureReason);
+        }
+
+        print(' ORDER CREATED SUCCESSFULLY!');
+
+        if (paymentMethod.toUpperCase() != 'COD') {
+          final orderResult = data['data'] ?? data['order'] ?? data;
+          final orderId =
+              orderResult['_id']?.toString() ?? orderResult['id']?.toString();
+
+          if (orderId != null) {
+            await sendPaymentConfirmation(
+              orderId: orderId,
+              amount: totalAmount,
+              paymentMethod: paymentMethod,
+            );
+          }
+        }
+
+        return Map<String, dynamic>.from(data as Map);
+      } else {
+        String errorMessage = 'Order creation failed: ${response.statusCode}';
+        try {
+          final errorData = jsonDecode(response.body);
+          errorMessage =
+              errorData['error'] ?? errorData['message'] ?? errorMessage;
+        } catch (e) {
+          errorMessage = response.body;
+        }
+
+        print(' Order creation error: $errorMessage');
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      print(' Error creating order from session: $e');
+      rethrow;
+    }
+  }
+
   static Future<void> _handleOrderPlacedNotification(
       Map<String, dynamic> orderResult,
       Map<String, dynamic> checkoutSession,
@@ -174,59 +318,56 @@ class OrderService {
         return;
       }
 
-      // Extract order details from result
-      final orderData = orderResult['data'] ?? orderResult['order'] ?? orderResult;
-      final orderId = orderData['_id']?.toString() ??
-          orderData['id']?.toString() ??
-          orderData['orderId']?.toString();
+      final orderData =
+          orderResult['data'] ?? orderResult['order'] ?? orderResult;
+      final orderId =
+          orderData['_id']?.toString() ??
+              orderData['id']?.toString() ??
+              orderData['orderId']?.toString();
 
       if (orderId == null) {
         print('No order ID found for notification');
         return;
       }
 
-      // Calculate total amount from checkout session or order result
       double totalAmount = 0.0;
-      final finalAmount = orderData['finalAmount'] ??
-          orderData['total'] ??
-          orderData['grandTotal'] ??
-          orderData['totalAmount'] ?? // Added totalAmount
-          checkoutSession['data']?['total'] ??
-          checkoutSession['total'];
+      final finalAmount =
+          orderData['finalAmount'] ??
+              orderData['total'] ??
+              orderData['grandTotal'] ??
+              orderData['totalAmount'] ??
+              checkoutSession['data']?['total'] ??
+              checkoutSession['total'];
 
       if (finalAmount != null) {
         totalAmount = safeToDouble(finalAmount);
       }
 
-      // Get items list for notification
-      final items = checkoutSession['data']?['items'] ??
-          checkoutSession['items'] ??
-          orderData['items'] ?? [];
+      final items =
+          checkoutSession['data']?['items'] ??
+              checkoutSession['items'] ??
+              orderData['items'] ??
+              [];
 
-      // Added a type check to safely handle item data and prevent crashes.
       List<String> itemNames = [];
       if (items is List) {
-        itemNames = items.map((item) {
-          final itemMap = item as Map<String, dynamic>;
-          // The 'item' key can contain a full Map or just a String ID
-          final itemData = itemMap['item'];
+        itemNames =
+            items.map((item) {
+              final itemMap = item as Map<String, dynamic>;
+              final itemData = itemMap['item'];
 
-          if (itemData is Map) {
-            // If itemData is a full object, get the name from it
-            return itemData['itemName']?.toString() ??
-                itemData['productName']?.toString() ??
-                'Unknown Item';
-          } else {
-            // If itemData is just a String ID, we can't get the name from it.
-            // Fallback to checking the parent map or using a generic placeholder.
-            return itemMap['itemName']?.toString() ??
-                itemMap['productName']?.toString() ??
-                'Product';
-          }
-        }).toList();
+              if (itemData is Map) {
+                return itemData['itemName']?.toString() ??
+                    itemData['productName']?.toString() ??
+                    'Unknown Item';
+              } else {
+                return itemMap['itemName']?.toString() ??
+                    itemMap['productName']?.toString() ??
+                    'Product';
+              }
+            }).toList();
       }
 
-      // Send order confirmation notification
       await _notificationManager.handleOrderPlaced(
         customerId: customerId,
         orderId: orderId,
@@ -234,14 +375,12 @@ class OrderService {
         items: itemNames,
       );
 
-      print('✅ Order placed notification sent successfully');
+      print(' Order placed notification sent successfully');
     } catch (e) {
       print('Error sending order placed notification: $e');
-      // Don't rethrow - notification failure shouldn't fail the order
     }
   }
 
-  // Enhanced updateOrderStatus method with notifications
   static Future<bool> updateOrderStatus(
       String orderId,
       String status, {
@@ -255,12 +394,13 @@ class OrderService {
 
       final requestBody = {
         'status': status,
-        if (estimatedDeliveryTime != null) 'estimatedDeliveryTime': estimatedDeliveryTime,
+        if (estimatedDeliveryTime != null)
+          'estimatedDeliveryTime': estimatedDeliveryTime,
         if (trackingNumber != null) 'trackingNumber': trackingNumber,
       };
 
       final response = await http
-          .put( // Changed from DELETE to PUT for status update
+          .put(
         Uri.parse('$baseUrl/api/orders/update-status/$orderId'),
         headers: _getHeaders(),
         body: jsonEncode(requestBody),
@@ -271,7 +411,6 @@ class OrderService {
       print('Update order status body: ${response.body}');
 
       if (response.statusCode == 200) {
-        // Send status update notification
         await _handleOrderStatusUpdateNotification(
           orderId: orderId,
           newStatus: status,
@@ -289,7 +428,6 @@ class OrderService {
     }
   }
 
-  // Handle order status update notification
   static Future<void> _handleOrderStatusUpdateNotification({
     required String orderId,
     required String newStatus,
@@ -298,17 +436,16 @@ class OrderService {
     String? trackingNumber,
   }) async {
     try {
-      // If customerId is not provided, try to get it from current user
       final targetCustomerId = customerId ?? _userData.getUserId();
 
       if (targetCustomerId == null) {
-        // If no customer ID available, try to fetch order details to get customer info
         final orderDetails = await fetchOrderDetails(orderId);
         if (orderDetails != null) {
           final parsedOrder = parseOrderData(orderDetails);
           final customerData = parsedOrder['customer'] as Map<String, dynamic>?;
-          final orderCustomerId = customerData?['_id']?.toString() ??
-              customerData?['id']?.toString();
+          final orderCustomerId =
+              customerData?['_id']?.toString() ??
+                  customerData?['id']?.toString();
 
           if (orderCustomerId != null) {
             await _notificationManager.handleOrderStatusChange(
@@ -318,7 +455,7 @@ class OrderService {
               estimatedDeliveryTime: estimatedDeliveryTime,
               trackingNumber: trackingNumber,
             );
-            print('✅ Order status update notification sent successfully');
+            print(' Order status update notification sent successfully');
             return;
           }
         }
@@ -334,14 +471,12 @@ class OrderService {
         trackingNumber: trackingNumber,
       );
 
-      print('✅ Order status update notification sent successfully');
+      print(' Order status update notification sent successfully');
     } catch (e) {
       print('Error sending order status update notification: $e');
-      // Don't rethrow - notification failure shouldn't fail the status update
     }
   }
 
-  // Method to send delivery reminder (can be called from admin panel or scheduled)
   static Future<void> sendDeliveryReminder({
     required String orderId,
     required String estimatedTime,
@@ -360,13 +495,12 @@ class OrderService {
         estimatedTime: estimatedTime,
       );
 
-      print('✅ Delivery reminder sent successfully');
+      print(' Delivery reminder sent successfully');
     } catch (e) {
       print('Error sending delivery reminder: $e');
     }
   }
 
-  // Method to send payment confirmation (call after successful payment)
   static Future<void> sendPaymentConfirmation({
     required String orderId,
     required double amount,
@@ -387,193 +521,24 @@ class OrderService {
         paymentMethod: paymentMethod,
       );
 
-      print('✅ Payment confirmation notification sent successfully');
+      print(' Payment confirmation notification sent successfully');
     } catch (e) {
       print('Error sending payment confirmation: $e');
     }
   }
 
-
-  static Future<Map<String, dynamic>> placeOrderFromSession({
-    required String checkoutSessionId,
-    // Customer/Address Info
-    required String customerName,
-    required String phoneNumber,
-    required String email,
-    required String houseNo,
-    required String area,
-    required String city,
-    required String state,
-    required String postalCode,
-    required String locationLink,
-
-    String? assignTo,
-    // Delivery Info
-    String? deliverySlotId,
-    Map<String, dynamic>? deliverySlotInfo,
-    bool isInstantDelivery = false,
-
-    // Keep parameter name as warehouseId for clarity in app
-    required String warehouseId,
-
-    // Price and payment parameters
-    required double subtotal,
-    required double deliveryCharge,
-    required double processingFee,
-    required double tip,
-    required double donation,
-    required double totalAmount,
-    required String paymentMethod,
-    required String paymentStatus,
-    required double tax,
-    required double discountApplied,
-
-    // --- NEW COUPON PARAMS ---
-    String? couponCode,
-    double couponDiscount = 0.0,
-
-    // Razorpay (optional)
-    String? razorpayPaymentId,
-    String? razorpayOrderId,
-    String? razorpaySignature,
-  }) async {
-    try {
-      print('=== PLACING ORDER FROM SESSION (CREATING ACTUAL ORDER) ===');
-      print('📊 Order Financial Details:');
-      print('   Subtotal: ₹$subtotal');
-      print('   Delivery Charge: ₹$deliveryCharge');
-      print('   Processing Fee: ₹$processingFee');
-      print('   Tip: ₹$tip');
-      print('   Donation: ₹$donation');
-      print('   Coupon Discount: ₹$couponDiscount');
-      print('   Total Amount: ₹$totalAmount');
-      print('🏪 Store/Warehouse ID: $warehouseId');
-
-      final orderData = {
-        'checkoutSessionId': checkoutSessionId,
-
-        // Customer Info
-        'customerName': customerName,
-        'phoneNumber': phoneNumber,
-        'email': email,
-        'country': 'India',
-        'state': state,
-        'city': city,
-        'houseNo': houseNo,
-        'area': area,
-        'postalCode': postalCode,
-        'locationLink': locationLink,
-        if (assignTo != null) 'assignTo': assignTo,
-
-        'store': warehouseId,
-
-        // Financial details
-        'subtotal': subtotal,
-        'deliveryCharge': deliveryCharge,
-        'processingFee': processingFee,
-        'tip': tip,
-        'donation': donation,
-        'totalAmount': totalAmount,
-        'grandTotal': totalAmount,
-        'tax': tax,
-        'discountApplied': discountApplied,
-
-        // --- NEW COUPON FIELDS IN API BODY ---
-        if (couponCode != null) 'couponCode': couponCode,
-        'couponDiscount': couponDiscount,
-
-        // Payment Info
-        'paymentMethod': paymentMethod,
-        'paymentStatus': paymentStatus,
-
-        // Add Razorpay details if they exist
-        if (razorpayPaymentId != null) 'razorpayPaymentId': razorpayPaymentId,
-        if (razorpayOrderId != null) 'razorpayOrderId': razorpayOrderId,
-        if (razorpaySignature != null) 'razorpaySignature': razorpaySignature,
-
-        // Delivery slot information
-        'deliveryType': isInstantDelivery ? 'instant' : 'scheduled',
-        'isInstantDelivery': isInstantDelivery,
-        if (deliverySlotId != null) 'deliverySlotId': deliverySlotId,
-        if (deliverySlotInfo != null) 'deliverySlotInfo': deliverySlotInfo,
-        if (!isInstantDelivery && deliverySlotInfo != null) ...{
-          'scheduledDeliveryDate': deliverySlotInfo['date'],
-          'scheduledDeliveryTime': deliverySlotInfo['timeRange'] ?? deliverySlotInfo['startTime'],
-          'deliverySlotDetails': {
-            'slotId': deliverySlotId,
-            'date': deliverySlotInfo['date'],
-            'startTime': deliverySlotInfo['startTime'],
-            'endTime': deliverySlotInfo['endTime'],
-            'displayText': deliverySlotInfo['displayText'],
-          },
-        },
-      };
-
-      // Debug: Print the actual request body
-      print('📤 Request Body (with "store" field):');
-      print(jsonEncode(orderData));
-
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/orders/place-from-session'),
-        headers: _getHeaders(),
-        body: jsonEncode(orderData),
-      ).timeout(const Duration(seconds: 30));
-
-      print('📥 Order placement response: ${response.statusCode}');
-      print('📥 Order placement body: ${response.body}');
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        print('✅ ORDER CREATED SUCCESSFULLY!');
-        print('🏪 Store ID: $warehouseId');
-        final data = jsonDecode(response.body);
-
-        // Send payment confirmation if not COD
-        if (paymentMethod.toUpperCase() != 'COD') {
-          final orderResult = data['data'] ?? data['order'] ?? data;
-          final orderId = orderResult['_id']?.toString() ?? orderResult['id']?.toString();
-
-          if (orderId != null) {
-            await sendPaymentConfirmation(
-              orderId: orderId,
-              amount: totalAmount,
-              paymentMethod: paymentMethod,
-            );
-          }
-        }
-
-        return Map<String, dynamic>.from(data as Map);
-      } else {
-        String errorMessage = 'Order creation failed: ${response.statusCode}';
-        try {
-          final errorData = jsonDecode(response.body);
-          errorMessage = errorData['message'] ?? errorData['error'] ?? errorMessage;
-        } catch (e) {
-          errorMessage = response.body;
-        }
-
-        print('❌ Order creation error: $errorMessage');
-        throw Exception(errorMessage);
-      }
-    } catch (e) {
-      print('❌ Error creating order from session: $e');
-      rethrow;
-    }
-  }
-  /// Get the current user's assigned store ID
   static String? getCurrentStoreId() {
     final userData = UserData();
     final user = userData.getCurrentUser();
     return user?.selectedWarehouseId;
   }
 
-  /// Validate that user has a store assigned before ordering
   static Future<bool> validateStoreAssignment() async {
     final storeId = getCurrentStoreId();
 
     if (storeId == null || storeId.isEmpty) {
-      print('⚠️ No store assigned to user');
+      print(' No store assigned to user');
 
-      // Try to auto-assign based on location
       final userData = UserData();
       final token = userData.getToken();
 
@@ -590,14 +555,13 @@ class OrderService {
       return false;
     }
 
-    print('✅ Store validated: $storeId');
+    print(' Store validated: $storeId');
     return true;
   }
 
-  // Utility method to trigger notifications for existing orders (useful for testing)
   static Future<void> triggerTestNotification({
     required String orderId,
-    required String type, // 'order_placed', 'status_change', 'payment', 'delivery_reminder'
+    required String type,
     Map<String, dynamic>? additionalData,
   }) async {
     try {
@@ -644,13 +608,12 @@ class OrderService {
           break;
       }
 
-      print('✅ Test notification sent successfully');
+      print(' Test notification sent successfully');
     } catch (e) {
       print('Error sending test notification: $e');
     }
   }
 
-  // Keep all your existing methods unchanged...
   static Future<Map<String, dynamic>?> fetchItemDetails(String itemId) async {
     try {
       print('=== FETCHING ITEM DETAILS: $itemId ===');
@@ -661,9 +624,6 @@ class OrderService {
         headers: _getHeaders(),
       )
           .timeout(const Duration(seconds: 10));
-
-      print('Fetch item details response: ${response.statusCode}');
-      print('Fetch item details body: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -678,7 +638,6 @@ class OrderService {
     }
   }
 
-  // Fetch user orders using the correct endpoint
   static Future<List<Map<String, dynamic>>> fetchUserOrders() async {
     try {
       print('=== FETCHING USER ORDERS ===');
@@ -687,17 +646,15 @@ class OrderService {
           .get(Uri.parse('$baseUrl/api/orders'), headers: _getHeaders())
           .timeout(const Duration(seconds: 30));
 
-      print('Fetch user orders response: ${response.statusCode}');
-      print('Fetch user orders body: ${response.body}');
-
-      // ✅ Handle 500 error with specific message about deliveryAgent
       if (response.statusCode == 500) {
         final errorData = jsonDecode(response.body);
         final errorMessage = errorData['message']?.toString() ?? '';
 
         if (errorMessage.contains('deliveryAgent') ||
             errorMessage.contains('strictPopulate')) {
-          print('⚠️ Backend schema error detected - deliveryAgent populate issue');
+          print(
+            '️ Backend schema error detected - deliveryAgent populate issue',
+          );
           throw Exception(
             'Server configuration error: The delivery agent field is not properly configured. '
                 'Please contact support or try again later.',
@@ -712,21 +669,22 @@ class OrderService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
 
-        // Handle different response structures
         List<Map<String, dynamic>> ordersList = [];
 
         if (data is List) {
-          ordersList = data
-              .map((item) => Map<String, dynamic>.from(item as Map))
-              .toList();
+          ordersList =
+              data
+                  .map((item) => Map<String, dynamic>.from(item as Map))
+                  .toList();
         } else if (data is Map) {
           final possibleKeys = ['data', 'orders', 'results', 'items'];
           for (final key in possibleKeys) {
             if (data[key] is List) {
               final list = data[key] as List;
-              ordersList = list
-                  .map((item) => Map<String, dynamic>.from(item as Map))
-                  .toList();
+              ordersList =
+                  list
+                      .map((item) => Map<String, dynamic>.from(item as Map))
+                      .toList();
               break;
             }
           }
@@ -747,7 +705,7 @@ class OrderService {
       rethrow;
     }
   }
-  // Fetch individual order details
+
   static Future<Map<String, dynamic>?> fetchOrderDetails(String orderId) async {
     try {
       print('=== FETCHING ORDER DETAILS: $orderId ===');
@@ -759,13 +717,9 @@ class OrderService {
       )
           .timeout(const Duration(seconds: 30));
 
-      print('Fetch order details response: ${response.statusCode}');
-      print('Fetch order details body: ${response.body}');
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
 
-        // Handle different response structures
         if (data is Map) {
           final orderData = data['data'] ?? data;
           return Map<String, dynamic>.from(orderData as Map);
@@ -784,7 +738,6 @@ class OrderService {
     }
   }
 
-  // Safe method to get order number from ID
   static String getOrderNumberFromId(String orderId) {
     try {
       if (orderId.length >= 8) {
@@ -798,7 +751,6 @@ class OrderService {
     }
   }
 
-  // Safe method to convert dynamic to double
   static double safeToDouble(dynamic value) {
     if (value == null) return 0.0;
     if (value is double) return value;
@@ -814,7 +766,6 @@ class OrderService {
     return 0.0;
   }
 
-  // Safe method to convert dynamic to int
   static int safeToInt(dynamic value) {
     if (value == null) return 0;
     if (value is int) return value;
@@ -830,11 +781,8 @@ class OrderService {
     return 0;
   }
 
-  // Parse order data to normalize the structure
-// Parse order data to normalize the structure
   static Map<String, dynamic> parseOrderData(Map<String, dynamic> rawOrder) {
     try {
-      // Safely extract order ID first
       final orderId =
           rawOrder['_id']?.toString() ??
               rawOrder['id']?.toString() ??
@@ -845,7 +793,6 @@ class OrderService {
               rawOrder['invoiceNumber']?.toString() ??
               (orderId != null ? getOrderNumberFromId(orderId) : 'SO/Unknown');
 
-      // Customer info parsing
       final customerData =
           rawOrder['customer'] ?? rawOrder['customerDetails'] ?? {};
       final customer =
@@ -867,7 +814,6 @@ class OrderService {
               rawOrder['customerEmail']?.toString() ??
               'N/A';
 
-      // Address parsing
       final shippingAddressData =
           rawOrder['shippingAddress'] ??
               rawOrder['deliveryAddress'] ??
@@ -882,7 +828,6 @@ class OrderService {
         shippingAddress = Map<String, dynamic>.from(shippingAddressData);
       }
 
-      // ITEMS PARSING
       final rawItems =
           rawOrder['items'] ??
               rawOrder['orderItems'] ??
@@ -896,7 +841,6 @@ class OrderService {
               try {
                 final itemMap = Map<String, dynamic>.from(item as Map);
 
-                // Handle different item structures
                 final itemData =
                     itemMap['item'] ?? itemMap['product'] ?? itemMap;
                 final itemDataMap =
@@ -916,7 +860,6 @@ class OrderService {
                     ? Map<String, dynamic>.from(categoryData)
                     : <String, dynamic>{};
 
-                // Image URL extraction
                 String? imageUrl = _extractImageUrl(itemDataMap);
 
                 return {
@@ -957,8 +900,7 @@ class OrderService {
                   'itemId':
                   itemDataMap['_id']?.toString() ??
                       itemDataMap['id']?.toString(),
-                  'itemImages':
-                  itemDataMap['itemImages'],
+                  'itemImages': itemDataMap['itemImages'],
                 };
               } catch (e) {
                 return {
@@ -979,12 +921,17 @@ class OrderService {
             }).toList();
       }
 
-      // Billing details extraction
       final finalAmount = safeToDouble(
-        rawOrder['finalAmount'] ?? rawOrder['total'] ?? rawOrder['grandTotal'] ?? rawOrder['totalAmount'],
+        rawOrder['finalAmount'] ??
+            rawOrder['total'] ??
+            rawOrder['grandTotal'] ??
+            rawOrder['totalAmount'],
       );
       final tax = safeToDouble(
-        rawOrder['tax'] ?? rawOrder['taxAmount'] ?? rawOrder['gst'] ?? rawOrder['vat'],
+        rawOrder['tax'] ??
+            rawOrder['taxAmount'] ??
+            rawOrder['gst'] ??
+            rawOrder['vat'],
       );
 
       final deliveryCharge = safeToDouble(
@@ -996,21 +943,24 @@ class OrderService {
       );
 
       final platformCharge = safeToDouble(
-        rawOrder['platformCharge'] ?? rawOrder['platformFee'] ?? rawOrder['handlingFee'],
+        rawOrder['platformCharge'] ??
+            rawOrder['platformFee'] ??
+            rawOrder['handlingFee'],
       );
 
       final discountApplied = safeToDouble(
-        rawOrder['discountApplied'] ?? rawOrder['discount'] ?? rawOrder['discountAmount'],
+        rawOrder['discountApplied'] ??
+            rawOrder['discount'] ??
+            rawOrder['discountAmount'],
       );
 
       final tip = safeToDouble(rawOrder['tip']);
       final donation = safeToDouble(rawOrder['donation']);
 
-      // Coupon Info Extraction
       final couponCode = rawOrder['couponCode']?.toString();
+      final couponId = rawOrder['coupon']?.toString();
       double couponDiscount = safeToDouble(rawOrder['couponDiscount']);
 
-      // Logic to handle if coupon discount is stored inside discountApplied
       if (couponDiscount == 0.0 && discountApplied > 0) {
         couponDiscount = discountApplied;
       }
@@ -1027,20 +977,22 @@ class OrderService {
         itemsTotal = finalAmount;
       }
 
+      // === FIXED DATE PARSING ===
+      // Use helper method to extract string from potential { $date: ... } map
+      final createdAtRaw =
+          rawOrder['createdAt'] ??
+              rawOrder['orderDate'] ??
+              rawOrder['orderTime'];
+      final updatedAtRaw = rawOrder['updatedAt'] ?? rawOrder['lastUpdated'];
+
       return {
         '_id': orderId ?? 'Unknown',
         'id': orderId ?? 'Unknown',
         'orderNumber': orderNumber,
         'invoiceNumber': orderNumber,
         'status': rawOrder['status']?.toString() ?? 'Unknown',
-        'createdAt':
-        rawOrder['createdAt']?.toString() ??
-            rawOrder['orderDate']?.toString() ??
-            '',
-        'updatedAt':
-        rawOrder['updatedAt']?.toString() ??
-            rawOrder['lastUpdated']?.toString() ??
-            '',
+        'createdAt': _extractDateString(createdAtRaw),
+        'updatedAt': _extractDateString(updatedAtRaw),
         'customerName': customerName,
         'customerPhone': customerPhone,
         'customerEmail': customerEmail,
@@ -1087,12 +1039,14 @@ class OrderService {
         'tip': tip,
         'donation': donation,
         'couponCode': couponCode,
+        'couponId': couponId,
         'couponDiscount': couponDiscount,
         'finalAmount': finalAmount,
         'grandTotal': finalAmount,
         'total': finalAmount,
         'totalAmount': finalAmount,
-        'deliveryType': rawOrder['deliveryType']?.toString() ??
+        'deliveryType':
+        rawOrder['deliveryType']?.toString() ??
             (rawOrder['isInstantDelivery'] == true ? 'instant' : 'scheduled'),
         'isInstantDelivery': rawOrder['isInstantDelivery'] ?? false,
         'deliverySlotId': rawOrder['deliverySlotId']?.toString(),
@@ -1102,7 +1056,6 @@ class OrderService {
         'deliverySlotDetails': rawOrder['deliverySlotDetails'],
       };
     } catch (e) {
-      // Return fallback structure
       return {
         '_id': 'Unknown',
         'id': 'Unknown',
@@ -1151,29 +1104,20 @@ class OrderService {
     const String imageBaseUrl =
         'https://pos.inspiredgrow.in/vps/uploads/qr/items/';
 
-    // Debug the item structure
-    print('=== IMAGE EXTRACTION DEBUG ===');
-    print('Item data keys: ${itemData.keys.toList()}');
-
-    // First, try to get images from itemImages field (same as ItemListPage)
     final itemImages = itemData['itemImages'];
     if (itemImages != null && itemImages is List && itemImages.isNotEmpty) {
       final firstImage = itemImages[0].toString();
       if (firstImage.isNotEmpty) {
         final imageUrl = '$imageBaseUrl$firstImage';
-        print('Found image from itemImages: $imageUrl');
         return imageUrl;
       }
     }
 
-    // Check if itemImages is a single string instead of array
     if (itemImages != null && itemImages is String && itemImages.isNotEmpty) {
       final imageUrl = '$imageBaseUrl$itemImages';
-      print('Found single image from itemImages: $imageUrl');
       return imageUrl;
     }
 
-    // Fallback: Check for other possible image fields
     final imageFields = [
       'image',
       'productImage',
@@ -1184,13 +1128,12 @@ class OrderService {
       'thumbnail',
       'itemImage',
       'productImg',
-      'images', // might be a single image field
+      'images',
     ];
 
     for (final field in imageFields) {
       final value = itemData[field];
       if (value != null) {
-        // Handle array of images
         if (value is List && value.isNotEmpty) {
           final firstImage = value[0].toString();
           if (firstImage.isNotEmpty) {
@@ -1198,53 +1141,41 @@ class OrderService {
             if (!imageUrl.startsWith('http')) {
               imageUrl = '$imageBaseUrl$imageUrl';
             }
-            print('Found image from $field array: $imageUrl');
             return imageUrl;
           }
-        }
-        // Handle single image
-        else if (value is String && value.isNotEmpty) {
+        } else if (value is String && value.isNotEmpty) {
           String imageUrl = value;
           if (!imageUrl.startsWith('http')) {
             imageUrl = '$imageBaseUrl$imageUrl';
           }
-          print('Found image from $field: $imageUrl');
           return imageUrl;
         }
       }
     }
 
-    print('No image URL found in item data');
-    print('Available fields: ${itemData.keys.toList()}');
     return null;
   }
 
-  // Re-order functionality
   static Future<Map<String, dynamic>?> reorderFromPreviousOrder(
       String orderId,
       ) async {
     try {
       print('=== REORDERING FROM ORDER: $orderId ===');
 
-      // First get the order details
       final orderDetails = await fetchOrderDetails(orderId);
       if (orderDetails == null) {
         throw Exception('Could not fetch order details for reordering');
       }
 
-      // Parse the order data
       final parsedOrder = parseOrderData(orderDetails);
 
-      // Extract items from the order
       final items = parsedOrder['items'] ?? [];
       if (items.isEmpty) {
         throw Exception('No items found in the order');
       }
 
-      // Prepare items for cart service
       List<Map<String, dynamic>> cartItems = [];
       for (final item in items) {
-        // Extract itemId and quantity from the order item
         final itemId =
             item['itemId'] ?? item['_id'] ?? item['id'] ?? item['productId'];
         final quantity = item['quantity'] ?? 1;
@@ -1266,7 +1197,6 @@ class OrderService {
 
       print('Adding ${cartItems.length} items to cart: $cartItems');
 
-      // Use CartService to add items to cart
       final result = await CartService.addItemsToCart(items: cartItems);
 
       if (result != null) {
@@ -1289,7 +1219,6 @@ class OrderService {
     }
   }
 
-  // Enhanced debug method to understand response structure
   static void debugOrderStructure(Map<String, dynamic> order) {
     print('=== ORDER STRUCTURE DEBUG ===');
     print('Order keys: ${order.keys.toList()}');
@@ -1329,30 +1258,26 @@ class OrderService {
     print('=== END DEBUG ===');
   }
 
-  // Rest of your existing methods...
   static Future<Map<String, dynamic>?> createCheckoutSession({
     String? warehouseId,
   }) async {
     try {
       print('=== CREATING CHECKOUT SESSION (FETCHING CART ITEMS) ===');
 
-      // Get warehouseId if not provided
       if (warehouseId == null) {
         final userData = UserData();
         final user = userData.getCurrentUser();
         warehouseId = user?.selectedWarehouseId;
       }
 
-      print('🏪 Store/Warehouse ID for checkout: $warehouseId');
+      print(' Store/Warehouse ID for checkout: $warehouseId');
 
       final checkoutData = {
-        // 🔧 CRITICAL FIX: Backend expects "store" not "warehouseId"
-        if (warehouseId != null && warehouseId.isNotEmpty)
-          'store': warehouseId,
+        if (warehouseId != null && warehouseId.isNotEmpty) 'store': warehouseId,
       };
 
       print('Creating checkout session with JWT token authentication');
-      print('📤 Checkout session data: ${jsonEncode(checkoutData)}');
+      print(' Checkout session data: ${jsonEncode(checkoutData)}');
 
       final response = await http
           .post(
@@ -1362,12 +1287,9 @@ class OrderService {
       )
           .timeout(const Duration(seconds: 30));
 
-      print('Checkout session response: ${response.statusCode}');
-      print('Checkout session body: ${response.body}');
-
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
-        print('✅ Checkout session created successfully');
+        print('Checkout session created successfully');
         print('Cart items fetched using JWT token');
         return Map<String, dynamic>.from(data as Map);
       } else {

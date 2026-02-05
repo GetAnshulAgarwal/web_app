@@ -1,4 +1,3 @@
-// otp_screen_authentication.dart
 import 'package:eshop/authentication/profile_creation_screen.dart';
 import 'package:eshop/authentication/user_data.dart';
 import 'package:flutter/material.dart';

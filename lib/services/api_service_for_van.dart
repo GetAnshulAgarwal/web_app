@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart'; // REQUIRED: Added for date parsing
 import '../authentication/user_data.dart';
 import '../model/van_booking/VanRoute_model.dart';
 import '../model/van_booking/response_model.dart';
@@ -62,10 +63,10 @@ class VanRouteApiService {
 
       final response = await http
           .post(
-            Uri.parse('$baseUrl/bookings'),
-            headers: _headers,
-            body: json.encode(requestBody),
-          )
+        Uri.parse('$baseUrl/bookings'),
+        headers: _headers,
+        body: json.encode(requestBody),
+      )
           .timeout(const Duration(seconds: 30));
 
       print('Booking API Response Status: ${response.statusCode}');
@@ -81,18 +82,12 @@ class VanRouteApiService {
           final bookingId = bookingData['_id'] ?? bookingData['id'];
           print('Created booking with ID: $bookingId');
 
-          // --- ADD THESE LINES ---
           final currentUserId = getUserId();
-          print('DEBUG CHECK: Checking condition to send notification...');
-          print('DEBUG CHECK: bookingId is -> $bookingId');
-          print('DEBUG CHECK: currentUserId is -> $currentUserId');
-          // --- END OF ADDED LINES ---
 
-          // --- MODIFIED IF-STATEMENT ---
           if (bookingId != null && currentUserId != null) {
             print('Attempting to trigger van booking notification...');
             await OrderNotificationManager().handleVanBooking(
-              customerId: currentUserId, // Use the variable here
+              customerId: currentUserId,
               bookingId: bookingId,
               location: '$street, $city',
               scheduledTime: DateTime.parse(scheduledFor),
@@ -114,9 +109,9 @@ class VanRouteApiService {
             status: bookingData['status'] ?? 'pending',
             id: bookingId?.toString() ?? '',
             createdAt:
-                bookingData['createdAt'] ?? DateTime.now().toIso8601String(),
+            bookingData['createdAt'] ?? DateTime.now().toIso8601String(),
             updatedAt:
-                bookingData['updatedAt'] ?? DateTime.now().toIso8601String(),
+            bookingData['updatedAt'] ?? DateTime.now().toIso8601String(),
             v: bookingData['__v'] ?? 0,
           );
         } else {
@@ -138,11 +133,7 @@ class VanRouteApiService {
     try {
       final tempBookings = await _getTemporaryBookings();
       tempBookings.add(bookingData);
-
-      // Store in local storage (you can use Hive or SharedPreferences)
-      // For now, we'll use a simple in-memory storage
       _tempBookings = tempBookings;
-
       print('Stored temporary booking: ${bookingData['id']}');
     } catch (e) {
       print('Error storing temporary booking: $e');
@@ -156,17 +147,13 @@ class VanRouteApiService {
     return List.from(_tempBookings);
   }
 
-  // In api_service_for_van.dart
-
-  // In api_service_for_van.dart
-
   Future<UserBooking?> getBookingDetails(String bookingId) async {
     try {
       final response = await http
           .get(
-            Uri.parse('$baseUrl/bookings/$bookingId/details'),
-            headers: _headers,
-          )
+        Uri.parse('$baseUrl/bookings/$bookingId/details'),
+        headers: _headers,
+      )
           .timeout(const Duration(seconds: 15));
 
       print('Booking details API Response Status: ${response.statusCode}');
@@ -175,19 +162,11 @@ class VanRouteApiService {
       if (response.statusCode == 200) {
         final dynamic responseData = json.decode(response.body);
 
-        // --- START OF FIX ---
-        // Handle the { "success": true, "data": { "booking": {...}, "order": {...} } } structure
         if (responseData is Map<String, dynamic> &&
             responseData['success'] == true &&
             responseData['data'] != null) {
           final bookingData = responseData['data']['booking'];
           final orderData = responseData['data']['order'];
-          // <-- Get the order object
-
-          print("------------------------------");
-          print('Booking Data: for order');
-
-          print(orderData);
 
           if (bookingData is Map<String, dynamic>) {
             // 1. Parse the booking
@@ -195,13 +174,12 @@ class VanRouteApiService {
 
             // 2. Parse the order (if it exists)
             final OrderInfo? order =
-                (orderData != null) ? OrderInfo.fromJson(orderData) : null;
+            (orderData != null) ? OrderInfo.fromJson(orderData) : null;
 
             // 3. Return the booking with the order injected using copyWith
             return booking.copyWith(order: order);
           }
         }
-        // --- END OF FIX ---
       }
       return null;
     } catch (e) {
@@ -210,33 +188,25 @@ class VanRouteApiService {
     }
   }
 
- 
-
   Future<String> _getResponseBody(http.Response response) async {
     try {
       final contentEncoding =
-          response.headers['content-encoding']?.toLowerCase();
+      response.headers['content-encoding']?.toLowerCase();
 
       if (contentEncoding == 'gzip') {
         print('Response is GZIP compressed - decompressing...');
         return utf8.decode(gzip.decode(response.bodyBytes));
       } else if (contentEncoding == 'deflate') {
         print('Response is deflate compressed - decompressing...');
-        // Handle deflate if needed
         return utf8.decode(response.bodyBytes);
       } else {
         return response.body;
       }
     } catch (e) {
       print('Error decompressing response: $e');
-      // Fallback to original body
       return response.body;
     }
   }
-
-  // In api_service_for_van.dart
-
-  // In api_service_for_van.dart
 
   Future<List<UserBooking>> getUserBookings() async {
     try {
@@ -246,16 +216,12 @@ class VanRouteApiService {
       }
 
       final token = _userData.getToken();
-      print(
-        'Making bookings request with token: ${token?.substring(0, 20)}...',
-      );
 
       final response = await http
           .get(Uri.parse('$baseUrl/bookings/my'), headers: _headers)
           .timeout(const Duration(seconds: 15));
 
       print('Bookings API Response Status: ${response.statusCode}');
-      print('Response Headers: ${response.headers}');
 
       String responseBody;
       try {
@@ -277,13 +243,10 @@ class VanRouteApiService {
 
         List<UserBooking> apiBookings = [];
 
-        // --- START OF FIX ---
         // Handle the { "success": true, "data": [...] } structure
         if (responseData is Map<String, dynamic> &&
             responseData['success'] == true) {
           final bookingsData = responseData['data'];
-
-          
 
           if (bookingsData is List) {
             print('Parsing ${bookingsData.length} bookings from "data" array');
@@ -295,8 +258,6 @@ class VanRouteApiService {
                     );
                   }).toList();
 
-                    
-
               await clearTemporaryBookings();
               return apiBookings;
             } catch (parseError) {
@@ -305,11 +266,9 @@ class VanRouteApiService {
             }
           }
         }
-        // --- END OF FIX ---
 
         // Fallback for old direct list structure
         if (responseData is List<dynamic>) {
-          print('Parsing ${responseData.length} bookings from direct array');
           apiBookings =
               responseData.map((bookingJson) {
                 return _parseBookingFromApi(
@@ -343,9 +302,6 @@ class VanRouteApiService {
       try {
         final tempBookings = await _getTemporaryBookingsAsUserBookings();
         if (tempBookings.isNotEmpty) {
-          print(
-            'Returning ${tempBookings.length} temporary bookings as fallback',
-          );
           return tempBookings;
         }
       } catch (tempError) {
@@ -354,21 +310,12 @@ class VanRouteApiService {
       return [];
     }
   }
-  // Enhanced booking parser to handle the full pickup address object
-  // In api_service_for_van.dart
-
-  // In api_service_for_van.dart
 
   UserBooking _parseBookingFromApi(Map<String, dynamic> bookingJson) {
     final bookingId = bookingJson['_id'] ?? bookingJson['id'] ?? '';
-    print('Parsing booking: $bookingId');
-    print('-----------------------------');
-    print(bookingJson);
 
-    // --- FIX CUSTOMER NORMALIZATION ---
+    // Normalize Customer
     final customerData = bookingJson['customer'];
-    print(bookingJson['order']);
-
     String customerId;
     if (customerData is Map<String, dynamic>) {
       customerId = customerData['_id']?.toString() ?? '';
@@ -376,7 +323,7 @@ class VanRouteApiService {
       customerId = customerData?.toString() ?? '';
     }
 
-    // --- FIX PICKUP ADDRESS NORMALIZATION ---
+    // Normalize Pickup Address
     final pickupAddressData = bookingJson['pickupAddress'];
     PickupAddress pickupAddress;
     if (pickupAddressData is Map<String, dynamic>) {
@@ -387,12 +334,13 @@ class VanRouteApiService {
       });
     }
 
-    // --- NEW: PARSE ORDER IF PRESENT ---
+    // Parse Order
     OrderInfo? order;
     if (bookingJson['order'] != null && bookingJson['order'] is Map) {
       order = OrderInfo.fromJson(bookingJson['order']);
     }
 
+    // -- CRITICAL PARSING LOGIC HERE --
     final booking = UserBooking(
       id: bookingId,
       customer: customerId,
@@ -404,86 +352,64 @@ class VanRouteApiService {
       createdAt: _parseDateTime(bookingJson['createdAt']) ?? DateTime.now(),
       updatedAt: _parseDateTime(bookingJson['updatedAt']) ?? DateTime.now(),
       v: bookingJson['__v'] ?? 0,
-      order: order, // <-- FIXED: AUTO-PARSED
+      order: order,
     );
 
-    print('Successfully parsed booking: ${booking.id} - ${booking.status}');
     return booking;
   }
 
-  // Add method to merge API bookings with temporary bookings (avoid duplicates)
   List<UserBooking> _mergeBookings(
-    List<UserBooking> apiBookings,
-    List<UserBooking> tempBookings,
-  ) {
+      List<UserBooking> apiBookings,
+      List<UserBooking> tempBookings,
+      ) {
     final Map<String, UserBooking> bookingsMap = {};
 
-    // Add API bookings first (they take precedence)
     for (final booking in apiBookings) {
       bookingsMap[booking.id] = booking;
     }
 
-    // Add temporary bookings only if not already present
     for (final booking in tempBookings) {
       if (!bookingsMap.containsKey(booking.id)) {
         bookingsMap[booking.id] = booking;
       }
     }
 
-    // Sort by creation date (newest first)
     final mergedBookings = bookingsMap.values.toList();
     mergedBookings.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
     return mergedBookings;
   }
 
-  // Enhanced method to get user bookings with smart merging
   Future<List<UserBooking>> getUserBookingsWithSmartMerge() async {
     try {
-      // Get bookings from API
       final apiBookings = await getUserBookings();
-
-      // If API worked, return API bookings
       if (apiBookings.isNotEmpty) {
         return apiBookings;
       }
-
-      // If API returned empty but we have temp bookings, return temp bookings
-      final tempBookings = await _getTemporaryBookingsAsUserBookings();
-      return tempBookings;
+      return await _getTemporaryBookingsAsUserBookings();
     } catch (e) {
       print('Error in smart merge: $e');
-      // Fallback to temporary bookings
       return await _getTemporaryBookingsAsUserBookings();
     }
   }
 
-  // Method to check API health and auto-clear temp data when API recovers
   Future<bool> checkApiHealthAndSync() async {
     try {
-      print('Checking API health...');
-
       final response = await http
           .get(Uri.parse('$baseUrl/bookings/my'), headers: _headers)
           .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
-        print('API is healthy - syncing data');
-
-        // API is working, clear temporary data and return fresh data
         await clearTemporaryBookings();
         return true;
       } else {
-        print('API still has issues: ${response.statusCode}');
         return false;
       }
     } catch (e) {
-      print('API health check failed: $e');
       return false;
     }
   }
 
-  // Convert temporary bookings to UserBooking objects
   Future<List<UserBooking>> _getTemporaryBookingsAsUserBookings() async {
     try {
       final tempBookings = await _getTemporaryBookings();
@@ -491,14 +417,10 @@ class VanRouteApiService {
         return _parseBookingFromApi(bookingData);
       }).toList();
     } catch (e) {
-      print('Error converting temporary bookings: $e');
       return [];
     }
   }
 
-  // Enhanced booking parser
-
-  // Helper method to parse coordinates
   List<double> _parseCoordinates(dynamic coordinates) {
     if (coordinates is List && coordinates.length >= 2) {
       try {
@@ -513,25 +435,39 @@ class VanRouteApiService {
     return [0.0, 0.0];
   }
 
-  // --- START: FIX FROM SCREENSHOT ---
-  // Helper method to parse DateTime
+  // --- FIX: UPDATED DATE PARSER ---
+  // Now handles both ISO and custom formats like "15 Jan 2026, 09:00 am"
   DateTime? _parseDateTime(dynamic dateTimeStr) {
     if (dateTimeStr == null) return null;
+
+    final str = dateTimeStr.toString().trim();
+    if (str.isEmpty) return null;
+
     try {
-      // <-- Removed the period from "try {."
-      return DateTime.parse(dateTimeStr.toString());
-    } catch (e) {
-      print('Error parsing DateTime: $e');
-      return null; // Return null to match nullable type
+      // 1. Try ISO-8601 first (standard)
+      return DateTime.parse(str);
+    } catch (_) {
+      // 2. Try the custom format from your API: "15 Jan 2026, 09:00 am"
+      try {
+        // Fix case sensitivity for AM/PM to ensure parsing works
+        String normalized = str;
+        if (str.toLowerCase().endsWith(' am')) {
+          normalized = str.substring(0, str.length - 3) + ' AM';
+        } else if (str.toLowerCase().endsWith(' pm')) {
+          normalized = str.substring(0, str.length - 3) + ' PM';
+        }
+
+        return DateFormat("d MMM yyyy, h:mm a").parse(normalized);
+      } catch (e) {
+        print('Error parsing DateTime ($str): $e');
+        // Return null instead of "now" so UI can handle it or show "N/A"
+        return null;
+      }
     }
   }
-  // --- END: FIX FROM SCREENSHOT ---
 
-  // Extract address info from remark (fallback)
   Map<String, String> _extractAddressFromRemark(String remark) {
     final result = <String, String>{};
-
-    // Try to extract address from remark like "Scheduled booking from 785, Sipri Bazar, Jhansi"
     if (remark.contains('from ')) {
       final addressPart = remark.split('from ').last;
       final addressParts = addressPart.split(', ');
@@ -546,17 +482,14 @@ class VanRouteApiService {
         }
       }
     }
-
     return result;
   }
 
-  // Clear temporary bookings (call this when API is working again)
   Future<void> clearTemporaryBookings() async {
     _tempBookings.clear();
     print('Cleared temporary bookings');
   }
 
-  // Method to retry getting bookings from API
   Future<List<UserBooking>> retryGetBookingsFromAPI() async {
     try {
       print('Retrying to get bookings from API...');
@@ -598,37 +531,8 @@ class VanRouteApiService {
     }
   }
 
-  // Book instant van
-  /*Future<BookingResponse> bookInstantVan({
-    required String location,
-    required Map<String, dynamic> pickupAddress,
-  }) async {
-    if (!isUserLoggedIn()) {
-      throw Exception('User not logged in');
-    }
-
-    final String scheduledFor = DateTime.now().toUtc().toIso8601String();
-
-    return await createBooking(
-      type: 'instant',
-      scheduledFor: scheduledFor,
-      remark: 'Instant booking from $location',
-      label: pickupAddress['label'] ?? 'Selected Location',
-      street: pickupAddress['street'] ?? location,
-      area: pickupAddress['area'] ?? 'Unknown Area',
-      city: pickupAddress['city'] ?? 'Unknown City',
-      state: pickupAddress['state'] ?? 'Unknown State',
-      country: pickupAddress['country'] ?? 'India',
-      postalCode: pickupAddress['postalCode'] ?? '000000',
-      coordinates: pickupAddress['coordinates']?.cast<double>(),
-    );
-  }*/
-
-  // REMOVED bookVanNow method as requested
-
   Future<BookingResponse> scheduleVanBookingWithAddress({
-    String?
-    addressId, // If provided, use existing address instead of creating new
+    String? addressId,
     required String location,
     required String street,
     required String area,
@@ -645,9 +549,7 @@ class VanRouteApiService {
 
     final String scheduledFor = scheduledDateTime.toUtc().toIso8601String();
 
-    // CRITICAL: If addressId is provided, use it. Otherwise, create new address.
     if (addressId != null && addressId.isNotEmpty) {
-      // Use existing address - DON'T send address details
       return await createBookingWithAddressId(
         addressId: addressId,
         type: 'scheduled',
@@ -655,7 +557,6 @@ class VanRouteApiService {
         remark: remark.isEmpty ? 'Scheduled booking from $location' : remark,
       );
     } else {
-      // Create new address (for current location or if save failed)
       return await createBooking(
         type: 'scheduled',
         scheduledFor: scheduledFor,
@@ -672,7 +573,6 @@ class VanRouteApiService {
     }
   }
 
-  // Schedule van booking
   Future<BookingResponse> createBookingWithAddressId({
     required String addressId,
     required String type,
@@ -684,18 +584,17 @@ class VanRouteApiService {
         'type': type,
         'scheduledFor': scheduledFor,
         'remark': remark,
-        'addressId':
-            addressId, // Send only the address ID, not full address data
+        'addressId': addressId,
       };
 
       print('Creating booking with address ID: ${json.encode(requestBody)}');
 
       final response = await http
           .post(
-            Uri.parse('$baseUrl/bookings'),
-            headers: _headers,
-            body: json.encode(requestBody),
-          )
+        Uri.parse('$baseUrl/bookings'),
+        headers: _headers,
+        body: json.encode(requestBody),
+      )
           .timeout(const Duration(seconds: 30));
 
       print('Booking API Response Status: ${response.statusCode}');
@@ -708,14 +607,8 @@ class VanRouteApiService {
           final bookingData = responseData['data'];
           final bookingId = bookingData['_id'] ?? bookingData['id'];
 
-          print(
-            'Created booking with ID: $bookingId using address ID: $addressId',
-          );
-
-          // Trigger notification
           final currentUserId = getUserId();
           if (bookingId != null && currentUserId != null) {
-            print('Attempting to trigger van booking notification...');
             await OrderNotificationManager().handleVanBooking(
               customerId: currentUserId,
               bookingId: bookingId,
@@ -724,7 +617,6 @@ class VanRouteApiService {
             );
           }
 
-          // Store the successful booking temporarily
           if (bookingId != null) {
             await _storeTemporaryBooking(bookingData);
           }
@@ -732,16 +624,14 @@ class VanRouteApiService {
           return BookingResponse(
             success: true,
             customer: bookingData['customer']?.toString() ?? '',
-            pickupAddress: addressId, // Return the address ID
+            pickupAddress: addressId,
             type: bookingData['type'] ?? type,
             scheduledFor: bookingData['scheduledFor'] ?? scheduledFor,
             remark: bookingData['remark'] ?? remark,
             status: bookingData['status'] ?? 'pending',
             id: bookingId?.toString() ?? '',
-            createdAt:
-                bookingData['createdAt'] ?? DateTime.now().toIso8601String(),
-            updatedAt:
-                bookingData['updatedAt'] ?? DateTime.now().toIso8601String(),
+            createdAt: bookingData['createdAt'] ?? DateTime.now().toIso8601String(),
+            updatedAt: bookingData['updatedAt'] ?? DateTime.now().toIso8601String(),
             v: bookingData['__v'] ?? 0,
           );
         } else {
@@ -758,7 +648,6 @@ class VanRouteApiService {
     }
   }
 
-  // UPDATE the existing scheduleVanBooking method to use the new one
   Future<BookingResponse> scheduleVanBooking({
     required String location,
     required Map<String, dynamic> pickupAddress,
@@ -769,15 +658,9 @@ class VanRouteApiService {
       throw Exception('User not logged in');
     }
 
-    // Check if pickupAddress contains an ID (existing address)
     final String? addressId = pickupAddress['id'] ?? pickupAddress['_id'];
 
-    print(
-      'Scheduling van booking at $location on $scheduledDateTime using address ID: $addressId',
-    );
-
     if (addressId != null && addressId.isNotEmpty) {
-      // Use existing address
       return await scheduleVanBookingWithAddress(
         addressId: addressId,
         location: location,
@@ -791,7 +674,6 @@ class VanRouteApiService {
         remark: remark,
       );
     } else {
-      // Create new address
       return await scheduleVanBookingWithAddress(
         addressId: null,
         location: location,
@@ -807,34 +689,6 @@ class VanRouteApiService {
     }
   }
 
-  // Mock bookings
-  List<UserBooking> _getMockBookings() {
-    return [
-      UserBooking(
-        id: 'mock_recent_${DateTime.now().millisecondsSinceEpoch}',
-        customer: '686b4ecacabd4d427f0589e7',
-        pickupAddress: PickupAddress(
-          id: 'mock_addr_001',
-          street: '785, Sipri Bazar',
-          area: 'Sipri Bazar',
-          city: 'Jhansi',
-          state: 'Uttar Pradesh',
-          country: 'India',
-          postalCode: '284003',
-          coordinates: [25.4567877, 78.5464999],
-        ),
-        bookingType: 'scheduled',
-        scheduledFor: DateTime.now().add(const Duration(hours: 1)),
-        remark: 'Scheduled booking from 785, Sipri Bazar, Jhansi',
-        status: 'pending',
-        createdAt: DateTime.now().subtract(const Duration(minutes: 2)),
-        updatedAt: DateTime.now().subtract(const Duration(minutes: 2)),
-        v: 0,
-      ),
-    ];
-  }
-
-  // Keep other methods as they were...
   Future<List<String>> getTodayRoutes() async {
     try {
       final response = await http.get(
@@ -915,28 +769,21 @@ class VanRouteApiService {
     }
   }
 
-  // In your VanRouteApiService, make sure the cancelBooking method looks like this:
-  // In your VanRouteApiService, update the cancelBooking method:
-  // In your VanRouteApiService, replace the existing cancelBooking method:
   Future<BookingCancelResponse> cancelBooking(String bookingId) async {
     try {
       print('Attempting to cancel booking: $bookingId');
 
       final response = await http
           .post(
-            Uri.parse('$baseUrl/bookings/$bookingId/cancel'),
-            headers: _headers,
-            body: json.encode({
-              'action': 'cancel',
-              'reason': 'Cancelled by user',
-            }),
-          )
+        Uri.parse('$baseUrl/bookings/$bookingId/cancel'),
+        headers: _headers,
+        body: json.encode({
+          'action': 'cancel',
+          'reason': 'Cancelled by user',
+        }),
+      )
           .timeout(const Duration(seconds: 30));
 
-      print('Cancel booking API Response Status: ${response.statusCode}');
-      print('Cancel booking API Response Body: ${response.body}');
-
-      // Check if response is HTML (error page) instead of JSON
       if (response.body.trim().startsWith('<!DOCTYPE html>') ||
           response.body.trim().startsWith('<html')) {
         String errorMessage;
@@ -962,50 +809,44 @@ class VanRouteApiService {
           final responseData = json.decode(response.body);
 
           if (responseData is Map<String, dynamic>) {
-            // Handle different response formats your API might return
             bool success = false;
             String message = 'Booking cancelled successfully';
             Map<String, dynamic>? bookingData;
 
-            // Format 1: {success: true, data: {...}, message: "..."}
             if (responseData.containsKey('success')) {
               success = responseData['success'] == true;
               message = responseData['message'] ?? message;
               bookingData = responseData['data'];
             }
-            // Format 2: Direct booking object with status
             else if (responseData.containsKey('_id') ||
                 responseData.containsKey('id')) {
               success = true;
               bookingData = responseData;
-              // Check if status is actually cancelled
               if (bookingData!['status'] == 'cancelled') {
                 message = 'Booking cancelled successfully';
               }
             }
-            // Format 3: Simple confirmation message
             else if (responseData.containsKey('message')) {
               success = true;
               message = responseData['message'];
             }
 
             if (success) {
-              // Update local temporary storage
               await _updateLocalBookingStatus(bookingId, 'cancelled');
 
               return BookingCancelResponse(
                 success: true,
                 message: message,
                 booking:
-                    bookingData != null
-                        ? _parseBookingFromApi(bookingData)
-                        : null,
+                bookingData != null
+                    ? _parseBookingFromApi(bookingData)
+                    : null,
               );
             } else {
               return BookingCancelResponse(
                 success: false,
                 message:
-                    message.isNotEmpty ? message : 'Failed to cancel booking',
+                message.isNotEmpty ? message : 'Failed to cancel booking',
                 booking: null,
               );
             }
@@ -1014,44 +855,22 @@ class VanRouteApiService {
           }
         } catch (jsonError) {
           print('JSON decode error: $jsonError');
-          print('Raw response: ${response.body}');
           throw Exception('Server returned invalid JSON response');
         }
       } else {
-        // Handle different HTTP error status codes
         String errorMessage;
-
         try {
           final errorData = json.decode(response.body);
           errorMessage = errorData['message'] ?? 'Unknown error occurred';
         } catch (e) {
-          // If we can't parse JSON error, use status code
           switch (response.statusCode) {
-            case 400:
-              errorMessage =
-                  'Invalid request. Booking may already be cancelled.';
-              break;
-            case 401:
-              errorMessage = 'Authentication failed. Please login again.';
-              break;
-            case 403:
-              errorMessage =
-                  'You do not have permission to cancel this booking.';
-              break;
-            case 404:
-              errorMessage =
-                  'Booking not found. It may have already been cancelled.';
-              break;
-            case 409:
-              errorMessage =
-                  'Booking cannot be cancelled in its current state.';
-              break;
-            case 500:
-              errorMessage = 'Server error. Please try again later.';
-              break;
-            default:
-              errorMessage =
-                  'Failed to cancel booking (HTTP ${response.statusCode})';
+            case 400: errorMessage = 'Invalid request. Booking may already be cancelled.'; break;
+            case 401: errorMessage = 'Authentication failed. Please login again.'; break;
+            case 403: errorMessage = 'You do not have permission to cancel this booking.'; break;
+            case 404: errorMessage = 'Booking not found. It may have already been cancelled.'; break;
+            case 409: errorMessage = 'Booking cannot be cancelled in its current state.'; break;
+            case 500: errorMessage = 'Server error. Please try again later.'; break;
+            default: errorMessage = 'Failed to cancel booking (HTTP ${response.statusCode})';
           }
         }
 
@@ -1066,8 +885,7 @@ class VanRouteApiService {
 
       String errorMessage;
       if (e.toString().contains('TimeoutException')) {
-        errorMessage =
-            'Request timed out. Please check your connection and try again.';
+        errorMessage = 'Request timed out. Please check your connection and try again.';
       } else if (e.toString().contains('SocketException')) {
         errorMessage = 'Network error. Please check your internet connection.';
       } else if (e.toString().contains('FormatException')) {
@@ -1082,14 +900,13 @@ class VanRouteApiService {
         booking: null,
       );
     }
-  } // Helper method to update local booking status
+  }
 
   Future<void> _updateLocalBookingStatus(
-    String bookingId,
-    String newStatus,
-  ) async {
+      String bookingId,
+      String newStatus,
+      ) async {
     try {
-      // Update temporary bookings
       for (int i = 0; i < _tempBookings.length; i++) {
         if (_tempBookings[i]['_id'] == bookingId ||
             _tempBookings[i]['id'] == bookingId) {
@@ -1108,7 +925,6 @@ class VanRouteApiService {
     }
   }
 
-  // Simple boolean version (if you prefer the original approach)
   Future<bool> cancelBookingSimple(String bookingId) async {
     try {
       final result = await cancelBooking(bookingId);
@@ -1133,7 +949,6 @@ class VanRouteApiService {
     }
   }
 
-  // Helper methods
   String getUserName() => _userData.getName();
   String getUserPhone() => _userData.getPhone();
   String getUserEmail() => _userData.getEmail();
@@ -1142,7 +957,6 @@ class VanRouteApiService {
   String getUserCountry() => _userData.getCountry();
   String? getUserId() => _userData.getUserId();
 
-  // Enhanced debug info
   Map<String, dynamic> getUserDebugInfo() {
     final user = _userData.getCurrentUser();
 
@@ -1157,20 +971,17 @@ class VanRouteApiService {
       'email': _userData.getEmail(),
       'city': _userData.getCity(),
       'state': _userData.getState(),
-      // --- START: FIX FROM SCREENSHOT ---
-      'country':
-          _userData.getCountry(), // <-- Fixed .Country() to .getCountry()
-      // --- END: FIX FROM SCREENSHOT ---
+      'country': _userData.getCountry(),
       'tempBookingsCount': _tempBookings.length,
       'userModelData':
-          user != null
-              ? {
-                'phone': user.phone,
-                'name': user.name,
-                'hasToken': user.token != null,
-                'isLoggedInFlag': user.isLoggedIn,
-              }
-              : null,
+      user != null
+          ? {
+        'phone': user.phone,
+        'name': user.name,
+        'hasToken': user.token != null,
+        'isLoggedInFlag': user.isLoggedIn,
+      }
+          : null,
     };
   }
 }

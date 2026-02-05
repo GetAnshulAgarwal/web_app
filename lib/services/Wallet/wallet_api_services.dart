@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 
 class WalletApiService {
   static const String _base = 'https://pos.inspiredgrow.in/vps';
@@ -51,6 +52,25 @@ class WalletApiService {
       };
     } catch (e, st) {
       _logError(e, st, function: 'redeemPoints');
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  // Add this method to your WalletApiService class
+  static Future<Map<String, dynamic>> getWalletSettings({String? token}) async {
+    const url = 'https://pos.inspiredgrow.in/vps/referral/settings';
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+
+    try {
+      final resp = await http.get(Uri.parse(url), headers: headers);
+      if (resp.statusCode == 200) {
+        return json.decode(resp.body);
+      }
+      return {'success': false, 'message': 'Failed to load settings'};
+    } catch (e) {
       return {'success': false, 'message': e.toString()};
     }
   }

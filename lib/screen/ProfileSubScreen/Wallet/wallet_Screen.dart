@@ -1,6 +1,6 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart'; // Ensure this is in your pubspec.yaml
 
 import '../../../services/Wallet/wallet_api_services.dart';
 import '../../../authentication/user_data.dart';
@@ -37,13 +37,7 @@ class _WalletScreenState extends State<WalletScreen> {
     final userId = userData.getUserId();
     final token = userData.getToken();
 
-    print('[WalletScreen] UserId: $userId');
-    print(
-      '[WalletScreen] Token available: ${token != null && token.isNotEmpty}',
-    );
-
     if (userId == null || userId.isEmpty) {
-      print('[WalletScreen] No userId found - user not logged in');
       setState(() => isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -54,19 +48,14 @@ class _WalletScreenState extends State<WalletScreen> {
     }
 
     try {
-      print('[WalletScreen] Fetching balance...');
       // Fetch balance
       final balanceResp = await WalletApiService.getBalance(
         customerId: userId,
         token: token,
       );
 
-      print('[WalletScreen] Balance response: ${json.encode(balanceResp)}');
-
       if (balanceResp['success'] == true && balanceResp['data'] != null) {
         final data = balanceResp['data'];
-        print('[WalletScreen] Balance data: ${json.encode(data)}');
-
         setState(() {
           pointsBalance = _parseIntValue(
             data['pointsBalance'] ?? data['points'] ?? 0,
@@ -75,20 +64,12 @@ class _WalletScreenState extends State<WalletScreen> {
             data['cashBalance'] ?? data['cash'] ?? 0,
           );
         });
-
-        print(
-          '[WalletScreen] Parsed balance - Points: $pointsBalance, Cash: $cashBalance',
-        );
       } else {
-        print(
-          '[WalletScreen] Balance fetch failed or no data: ${balanceResp['message'] ?? 'Unknown error'}',
-        );
         setState(() {
           errorMessage = balanceResp['message'] ?? 'Failed to load balance';
         });
       }
 
-      print('[WalletScreen] Fetching transactions...');
       // Fetch transactions
       final txResp = await WalletApiService.getTransactions(
         customerId: userId,
@@ -97,12 +78,8 @@ class _WalletScreenState extends State<WalletScreen> {
         token: token,
       );
 
-      print('[WalletScreen] Transactions response: ${json.encode(txResp)}');
-
       if (txResp['success'] == true && txResp['data'] != null) {
         final txData = txResp['data'];
-        print('[WalletScreen] Transaction data type: ${txData.runtimeType}');
-
         List<dynamic> txList = [];
         if (txData is List) {
           txList = txData;
@@ -110,15 +87,10 @@ class _WalletScreenState extends State<WalletScreen> {
           txList = txData['transactions'] ?? txData['data'] ?? [];
         }
 
-        print('[WalletScreen] Transaction list length: ${txList.length}');
-
         setState(() {
           transactions =
               txList.map((x) {
                 try {
-                  print(
-                    '[WalletScreen] Parsing transaction: ${json.encode(x)}',
-                  );
                   return Transaction.fromJson(x);
                 } catch (e, st) {
                   print('[WalletScreen] Error parsing transaction: $e');
@@ -128,14 +100,7 @@ class _WalletScreenState extends State<WalletScreen> {
               }).toList();
           isLoading = false;
         });
-
-        print(
-          '[WalletScreen] Successfully parsed ${transactions.length} transactions',
-        );
       } else {
-        print(
-          '[WalletScreen] Transaction fetch failed: ${txResp['message'] ?? 'Unknown error'}',
-        );
         setState(() {
           isLoading = false;
           errorMessage = txResp['message'] ?? 'Failed to load transactions';
@@ -149,15 +114,7 @@ class _WalletScreenState extends State<WalletScreen> {
         isLoading = false;
         errorMessage = e.toString();
       });
-
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error loading wallet: $e')));
-      }
     }
-
-    print('[WalletScreen] fetchTransactionsFromApi completed');
   }
 
   int _parseIntValue(dynamic value) {
@@ -178,10 +135,6 @@ class _WalletScreenState extends State<WalletScreen> {
 
   @override
   Widget build(BuildContext context) {
-    print(
-      '[WalletScreen] build called - isLoading: $isLoading, transactions: ${transactions.length}',
-    );
-
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -202,311 +155,232 @@ class _WalletScreenState extends State<WalletScreen> {
         centerTitle: false,
       ),
       body:
-          isLoading
-              ? const Center(
-                child: CircularProgressIndicator(color: Colors.black),
-              )
-              : RefreshIndicator(
-                color: Colors.black,
-                onRefresh: fetchTransactionsFromApi,
-                child: ListView(
+      isLoading
+          ? const Center(
+        child: CircularProgressIndicator(color: Colors.black),
+      )
+          : RefreshIndicator(
+        color: Colors.black,
+        onRefresh: fetchTransactionsFromApi,
+        child: ListView(
+          children: [
+            const SizedBox(height: 12),
+
+            // Balance Card
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [
+                      Color.fromARGB(255, 24, 144, 8),
+                      Color.fromARGB(255, 48, 48, 48),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SizedBox(height: 12),
-
-                    // Balance Card with Gradient
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [
-                              Color.fromARGB(255, 24, 144, 8),
-                              Color.fromARGB(255, 48, 48, 48),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: const Icon(
-                                    Icons.account_balance_wallet,
-                                    color: Colors.white,
-                                    size: 20,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                const Text(
-                                  'Available Balance',
-                                  style: TextStyle(
-                                    color: Color.fromARGB(255, 255, 255, 255),
-                                    fontSize: 14,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 24),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            Icons.stars_rounded,
-                                            color: Colors.amber[300],
-                                            size: 18,
-                                          ),
-                                          const SizedBox(width: 6),
-                                          const Text(
-                                            'Points',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        '$pointsBalance',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 28,
-                                          fontWeight: FontWeight.bold,
-                                          letterSpacing: -0.5,
-                                        ),
-                                      ),
-                                      const Text(
-                                        'pts',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  height: 60,
-                                  width: 1,
-                                  color: Colors.white.withOpacity(0.2),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            Icons.currency_rupee,
-                                            color: Colors.green[300],
-                                            size: 18,
-                                          ),
-                                          const SizedBox(width: 2),
-                                          const Text(
-                                            'Cash',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        '₹${cashBalance.toStringAsFixed(2)}',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 28,
-                                          fontWeight: FontWeight.bold,
-                                          letterSpacing: -0.5,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    // // Action Buttons
-                    // Padding(
-                    //   padding: const EdgeInsets.symmetric(horizontal: 16),
-                    //   child: Row(
-                    //     children: [
-                    //       Expanded(
-                    //         flex: 2,
-                    //         child: ElevatedButton.icon(
-                    //           onPressed: () {
-                    //             ScaffoldMessenger.of(context).showSnackBar(
-                    //               const SnackBar(
-                    //                 content: Text(
-                    //                   'Add money feature coming soon',
-                    //                 ),
-                    //               ),
-                    //             );
-                    //           },
-                    //           icon: const Icon(
-                    //             Icons.add_circle_outline,
-                    //             size: 20,
-                    //           ),
-                    //           label: const Text(
-                    //             'Add Money',
-                    //             style: TextStyle(fontWeight: FontWeight.w600),
-                    //           ),
-                    //           style: ElevatedButton.styleFrom(
-                    //             foregroundColor: Colors.black,
-                    //             backgroundColor: Colors.white,
-                    //             elevation: 0,
-                    //             shape: RoundedRectangleBorder(
-                    //               borderRadius: BorderRadius.circular(12),
-                    //               side: BorderSide(color: Colors.grey[300]!),
-                    //             ),
-                    //             padding: const EdgeInsets.symmetric(
-                    //               vertical: 14,
-                    //             ),
-                    //           ),
-                    //         ),
-                    //       ),
-                    //       const SizedBox(width: 12),
-                    //       Expanded(
-                    //         flex: 2,
-                    //         child: ElevatedButton.icon(
-                    //           onPressed: () {
-                    //             ScaffoldMessenger.of(context).showSnackBar(
-                    //               const SnackBar(
-                    //                 content: Text(
-                    //                   'Redeem is available from Cart during checkout',
-                    //                 ),
-                    //               ),
-                    //             );
-                    //           },
-                    //           icon: const Icon(Icons.card_giftcard, size: 20),
-                    //           label: const Text(
-                    //             'Redeem',
-                    //             style: TextStyle(fontWeight: FontWeight.w600),
-                    //           ),
-                    //           style: ElevatedButton.styleFrom(
-                    //             foregroundColor: Colors.white,
-                    //             backgroundColor: Colors.black,
-                    //             elevation: 0,
-                    //             shape: RoundedRectangleBorder(
-                    //               borderRadius: BorderRadius.circular(12),
-                    //             ),
-                    //             padding: const EdgeInsets.symmetric(
-                    //               vertical: 14,
-                    //             ),
-                    //           ),
-                    //         ),
-                    //       ),
-                    //     ],
-                    //   ),
-                    // ),
-                    const SizedBox(height: 28),
-
-                    // Transaction History Header
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.history, size: 22),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Transaction History',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const Spacer(),
-                          if (transactions.isNotEmpty)
-                            Text(
-                              '${transactions.length} total',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // Error message if any
-                    if (errorMessage != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.red[50],
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.red[200]!),
+                            color: Colors.white.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Row(
+                          child: const Icon(
+                            Icons.account_balance_wallet,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Text(
+                          'Available Balance',
+                          style: TextStyle(
+                            color: Color.fromARGB(255, 255, 255, 255),
+                            fontSize: 14,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.error_outline, color: Colors.red[700]),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  errorMessage!,
-                                  style: TextStyle(
-                                    color: Colors.red[900],
-                                    fontWeight: FontWeight.w500,
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.stars_rounded,
+                                    color: Colors.amber[300],
+                                    size: 18,
                                   ),
+                                  const SizedBox(width: 6),
+                                  const Text(
+                                    'Points',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '$pointsBalance',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                              const Text(
+                                'pts',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                      ),
-
-                    // Transactions List
-                    _buildTransactionsList(),
-
-                    const SizedBox(height: 20),
+                        Container(
+                          height: 60,
+                          width: 1,
+                          color: Colors.white.withOpacity(0.2),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.currency_rupee,
+                                    color: Colors.green[300],
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  const Text(
+                                    'Cash',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '₹${cashBalance.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
+            ),
+
+            const SizedBox(height: 28),
+
+            // Transaction History Header
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  const Icon(Icons.history, size: 22),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Transaction History',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (transactions.isNotEmpty)
+                    Text(
+                      '${transactions.length} total',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Error message
+            if (errorMessage != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.red[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.red[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline, color: Colors.red[700]),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          errorMessage!,
+                          style: TextStyle(
+                            color: Colors.red[900],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // Transactions List
+            _buildTransactionsList(),
+
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _buildTransactionsList() {
-    print(
-      '[WalletScreen] _buildTransactionsList called with ${transactions.length} transactions',
-    );
-
     if (transactions.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(40),
@@ -533,11 +407,6 @@ class _WalletScreenState extends State<WalletScreen> {
                 fontWeight: FontWeight.w500,
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Your transaction history will appear here',
-              style: TextStyle(fontSize: 13, color: Colors.grey[500]),
-            ),
           ],
         ),
       );
@@ -552,10 +421,6 @@ class _WalletScreenState extends State<WalletScreen> {
       }
       groupedTransactions[dateKey]!.add(transaction);
     }
-
-    print(
-      '[WalletScreen] Grouped transactions into ${groupedTransactions.length} date groups',
-    );
 
     List<Widget> dateGroups = [];
     groupedTransactions.forEach((date, transactions) {
@@ -587,7 +452,7 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   Widget _buildTransactionItem(Transaction transaction) {
-    final isCredit = (transaction.points ?? 0) > 0;
+    final bool isCredit = (transaction.points ?? 0) >= 0;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -658,7 +523,7 @@ class _WalletScreenState extends State<WalletScreen> {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    '${isCredit ? '+' : '-'}${(transaction.points ?? 0).abs()} pts',
+                    '${isCredit ? '+' : ''}${(transaction.points ?? 0)} pts',
                     style: TextStyle(
                       color: isCredit ? Colors.green[700] : Colors.red[700],
                       fontWeight: FontWeight.bold,
@@ -737,45 +602,78 @@ class Transaction {
 
     final amountVal = json['amount'] ?? json['spendAmount'];
     final double? amount =
-        amountVal != null
-            ? (amountVal is num
-                ? amountVal.toDouble()
-                : double.tryParse(amountVal.toString()))
-            : null;
+    amountVal != null
+        ? (amountVal is num
+        ? amountVal.toDouble()
+        : double.tryParse(amountVal.toString()))
+        : null;
 
     final pointsVal =
         json['points'] ?? json['pointsEarned'] ?? json['pointsSpent'];
     final int? points =
-        pointsVal != null
-            ? (pointsVal is num
-                ? pointsVal.toInt()
-                : int.tryParse(pointsVal.toString()))
-            : null;
+    pointsVal != null
+        ? (pointsVal is num
+        ? pointsVal.toInt()
+        : int.tryParse(pointsVal.toString()))
+        : null;
 
+    // --- FIX START ---
     final dateVal =
-        json['createdAt'] ??
-        json['date'] ??
-        json['created_at'] ??
-        json['timestamp'];
+        json['createdAtIST'] ??
+            json['createdAt'] ??
+            json['date'] ??
+            json['created_at'] ??
+            json['timestamp'];
+
     DateTime date;
     try {
       if (dateVal is String) {
-        date = DateTime.parse(dateVal);
+        // Fix for "pm"/"am" lowercase which causes DateFormat to fail
+        // Example input: "13 Jan 2026, 11:56 pm"
+        String dateStr = dateVal.trim();
+
+        // Ensure AM/PM is uppercase for the parser
+        if (dateStr.toLowerCase().endsWith(" pm")) {
+          dateStr = dateStr.substring(0, dateStr.length - 3) + " PM";
+        } else if (dateStr.toLowerCase().endsWith(" am")) {
+          dateStr = dateStr.substring(0, dateStr.length - 3) + " AM";
+        }
+
+        try {
+          // Attempt custom format with uppercase PM/AM
+          date = DateFormat("d MMM yyyy, h:mm a").parse(dateStr);
+        } catch (_) {
+          // Fallback to ISO format if custom fails
+          try {
+            date = DateTime.parse(dateVal);
+          } catch (_) {
+            print('[Transaction] Failed to parse date: $dateVal. Using now()');
+            date = DateTime.now();
+          }
+        }
       } else if (dateVal is int) {
         date = DateTime.fromMillisecondsSinceEpoch(dateVal);
       } else {
         date = DateTime.now();
-        print('[Transaction] Could not parse date, using current time');
       }
     } catch (e) {
-      print('[Transaction] Error parsing date: $e');
+      print('[Transaction] Error in date block: $e');
       date = DateTime.now();
     }
+    // --- FIX END ---
 
-    final description = json['description'] ?? json['desc'] ?? json['note'];
-    final type = json['type'] ?? json['transactionType'];
+    String? description =
+        json['description'] ?? json['desc'] ?? json['note'];
 
-    final transaction = Transaction(
+    if (description == null && json['subType'] != null) {
+      description = json['subType'].toString()
+          .replaceAll('_', ' ')
+          .toUpperCase();
+    }
+
+    final type = json['type'] ?? json['transactionType'] ?? json['txType'];
+
+    return Transaction(
       id: id?.toString(),
       amount: amount,
       points: points,
@@ -783,16 +681,5 @@ class Transaction {
       description: description?.toString(),
       type: type?.toString(),
     );
-
-    print(
-      '[Transaction] Parsed transaction: id=$id, points=$points, amount=$amount, date=$date',
-    );
-
-    return transaction;
-  }
-
-  @override
-  String toString() {
-    return 'Transaction(id: $id, points: $points, amount: $amount, date: $date, description: $description)';
   }
 }
