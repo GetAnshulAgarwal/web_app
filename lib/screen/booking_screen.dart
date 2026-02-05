@@ -1063,10 +1063,67 @@ class _VanRoutePageState extends State<VanRoutePage>
     final bool? addressConfirmed = await _showAddressConfirmationDialog();
     if (addressConfirmed != true) return;
 
-    final DateTime? selectedDate = await _showDatePicker();
+    // --- TIME CALCULATION LOGIC ---
+    final DateTime now = DateTime.now();
+
+    // 1. Minimum allowed time (Abhi se 30 min baad)
+    final DateTime minBufferedTime = now.add(const Duration(minutes: 30));
+
+    // 2. Aaj ka closing time (7:00 PM)
+    final DateTime todayClosingTime = DateTime(now.year, now.month, now.day, 19, 0);
+
+    DateTime initialDateToShow;
+    TimeOfDay initialTimeToShow;
+    DateTime firstDateAllowed; // Calendar pichle din disable karne ke liye
+
+    // Logic: Agar abhi se 30 min baad ka time 7 PM cross kar raha hai
+    // To seedha KAL (Tomorrow) par shift ho jao
+    if (minBufferedTime.isAfter(todayClosingTime)) {
+      initialDateToShow = now.add(const Duration(days: 1)); // Tomorrow
+      initialTimeToShow = const TimeOfDay(hour: 9, minute: 0); // 9:00 AM
+      firstDateAllowed = initialDateToShow; // Aaj ki date select hi nahi karne denge
+    } else {
+      // Agar abhi time bacha hai (Before 7 PM)
+      initialDateToShow = now;
+      firstDateAllowed = now;
+
+      // Agar subah 9 baje se pehle ka time hai, to 9 baje se start karo
+      if (minBufferedTime.hour < 9) {
+        initialTimeToShow = const TimeOfDay(hour: 9, minute: 0);
+      } else {
+        // Warna abhi se 30 min baad ka time dikhao (e.g., 6:00 -> 6:30)
+        initialTimeToShow = TimeOfDay.fromDateTime(minBufferedTime);
+      }
+    }
+
+    // --- STEP 1: DATE PICKER ---
+    final DateTime? selectedDate = await _showDatePicker(
+      initialDate: initialDateToShow,
+      firstDate: firstDateAllowed,
+    );
     if (selectedDate == null) return;
 
-    final TimeOfDay? selectedTime = await _showTimePicker();
+    // --- STEP 2: TIME PICKER (With Smart Showcase) ---
+    // Agar user ne 'Aaj' select kiya hai, to hume time restrict karna padega
+    final bool isToday = selectedDate.year == now.year &&
+        selectedDate.month == now.month &&
+        selectedDate.day == now.day;
+
+    // Time picker kholte waqt hum wahi time pass karenge jo valid hai
+    TimeOfDay timeToDisplayInPicker = initialTimeToShow;
+
+    // Agar user ne "Kal" select kiya hai manually date picker se,
+    // to time 9:00 AM reset kar do (bhalai logic ne 6:30 calculate kiya ho)
+    if (!isToday) {
+      timeToDisplayInPicker = const TimeOfDay(hour: 9, minute: 0);
+    }
+
+    final TimeOfDay? selectedTime = await _showTimePicker(
+      initialTime: timeToDisplayInPicker,
+      isToday: isToday, // Ye naya parameter pass karenge
+      minTimeIfToday: TimeOfDay.fromDateTime(minBufferedTime),
+    );
+
     if (selectedTime == null) return;
 
     final DateTime scheduledDateTime = DateTime(
@@ -1077,39 +1134,39 @@ class _VanRoutePageState extends State<VanRoutePage>
       selectedTime.minute,
     );
 
-    final DateTime now = DateTime.now();
-    final DateTime minimumAllowedTime = now.add(const Duration(minutes: 30));
+    // --- STEP 3: FINAL VALIDATION ---
 
-    if (scheduledDateTime.isBefore(minimumAllowedTime)) {
-      if (mounted) {
-        if (scheduledDateTime.isBefore(now)) {
-          SnackbarUtils.showError(
-            context,
-            'You cannot schedule a van for a past time.',
-          );
-        } else {
-          SnackbarUtils.showError(
-            context,
-            'Please schedule your booking at least 30 minutes in advance.',
-          );
-        }
-      }
-      return;
-    }
-
-    // --- TIME VALIDATION START ---
-    if (selectedTime.hour < 9 ||
-        (selectedTime.hour >= 19 && selectedTime.minute > 0)) {
+    // Check 1: Operating Hours (9 AM - 7 PM)
+    if (selectedTime.hour < 9 || (selectedTime.hour >= 19 && selectedTime.minute > 0)) {
       if (mounted) {
         SnackbarUtils.showError(
           context,
-          'Van services are only available between 9:00 AM and 7:00 PM',
+          'Services available between 9:00 AM and 7:00 PM only.',
         );
       }
       return;
     }
-    // --- TIME VALIDATION END ---
 
+    // Check 2: 30 Minute Buffer (Sirf agar aaj ki booking hai)
+    if (isToday) {
+      // Convert selections to comparable minutes
+      final int selectedMinutes = selectedTime.hour * 60 + selectedTime.minute;
+      final int minBufferMinutes = minBufferedTime.hour * 60 + minBufferedTime.minute;
+
+      if (selectedMinutes < minBufferMinutes) {
+        if (mounted) {
+          // Show specifically what time is required
+          final String validTimeStr = TimeOfDay.fromDateTime(minBufferedTime).format(context);
+          SnackbarUtils.showError(
+            context,
+            'For today, please select time after $validTimeStr (30 min gap).',
+          );
+        }
+        return;
+      }
+    }
+
+    // ... Baaki code same rahega (Remark dialog aur API Call) ...
     if (!mounted) return;
     final String? userRemark = await _showRemarkDialog();
     if (userRemark == null) return;
@@ -1134,24 +1191,20 @@ class _VanRoutePageState extends State<VanRoutePage>
         pickupAddress['id'] = _selectedAddressId;
       }
 
+      // Address Validation Block
       if (_selectedAddressId == null || _selectedAddressId!.isEmpty) {
         final List<String> missing = [];
-        if ((pickupAddress['street']?.toString() ?? '').trim().isEmpty)
-          missing.add('street');
-        if ((pickupAddress['city']?.toString() ?? '').trim().isEmpty)
-          missing.add('city');
-        if ((pickupAddress['state']?.toString() ?? '').trim().isEmpty)
-          missing.add('state');
-        if ((pickupAddress['country']?.toString() ?? '').trim().isEmpty)
-          missing.add('country');
-        if ((pickupAddress['postalCode']?.toString() ?? '').trim().isEmpty)
-          missing.add('postalCode');
+        if ((pickupAddress['street']?.toString() ?? '').trim().isEmpty) missing.add('street');
+        if ((pickupAddress['city']?.toString() ?? '').trim().isEmpty) missing.add('city');
+        if ((pickupAddress['state']?.toString() ?? '').trim().isEmpty) missing.add('state');
+        if ((pickupAddress['country']?.toString() ?? '').trim().isEmpty) missing.add('country');
+        if ((pickupAddress['postalCode']?.toString() ?? '').trim().isEmpty) missing.add('postalCode');
 
         if (missing.isNotEmpty) {
           loadingSnackbar.close();
           SnackbarUtils.showError(
             context,
-            'Address incomplete: ${missing.join(', ')}. Please select or enter a complete address.',
+            'Address incomplete: ${missing.join(', ')}.',
           );
           return;
         }
@@ -1173,40 +1226,24 @@ class _VanRoutePageState extends State<VanRoutePage>
           _showSuccessDialog(
             'Van Scheduled Successfully!',
             result.id,
-            additionalInfo:
-            'Scheduled for ${scheduledDateTime.toDisplayFormat()}',
+            additionalInfo: 'Scheduled for ${scheduledDateTime.toDisplayFormat()}',
           );
           _loadUserBookings();
-
-          SnackbarUtils.showBookingSuccess(
-            context,
-            result.id,
-            onViewBooking: () => _loadUserBookings(),
-          );
+          SnackbarUtils.showBookingSuccess(context, result.id, onViewBooking: () => _loadUserBookings());
         } else {
-          SnackbarUtils.showError(
-            context,
-            'Failed to schedule van. Please try again.',
-          );
+          SnackbarUtils.showError(context, 'Failed to schedule van. Please try again.');
         }
       }
     } catch (e) {
       if (mounted) {
         loadingSnackbar.close();
-
         if (e.toString().contains('User not logged in')) {
           _showLoginRequiredDialog();
-          return;
         } else if (e.toString().contains('Session expired')) {
           _showSessionExpiredDialog();
-          return;
+        } else {
+          SnackbarUtils.showApiError(context, e.toString(), onRetry: _scheduleVanBooking);
         }
-
-        SnackbarUtils.showApiError(
-          context,
-          e.toString(),
-          onRetry: _scheduleVanBooking,
-        );
       }
     }
   }
@@ -1276,11 +1313,14 @@ class _VanRoutePageState extends State<VanRoutePage>
     );
   }
 
-  Future<DateTime?> _showDatePicker() async {
+  Future<DateTime?> _showDatePicker({
+    required DateTime initialDate,
+    required DateTime firstDate,
+  }) async {
     return await showDatePicker(
       context: context,
-      initialDate: DateTime.now().add(const Duration(days: 1)),
-      firstDate: DateTime.now(),
+      initialDate: initialDate,
+      firstDate: firstDate, // Ye ensure karega ki agar 7pm baj gaye to aaj ki date disable ho
       lastDate: DateTime.now().add(const Duration(days: 30)),
       builder: (context, child) {
         return Theme(
@@ -1293,23 +1333,27 @@ class _VanRoutePageState extends State<VanRoutePage>
     );
   }
 
-  Future<TimeOfDay?> _showTimePicker() async {
-    // 1. Calculate a valid initial time to show
-    // If current time is out of bounds (before 9AM or after 7PM), default to 9:00 AM
-    TimeOfDay initial = TimeOfDay.now();
-    if (initial.hour < 9) {
-      initial = const TimeOfDay(hour: 9, minute: 0);
-    } else if (initial.hour >= 19) {
-      initial = const TimeOfDay(hour: 9, minute: 0);
+  Future<TimeOfDay?> _showTimePicker({
+    required TimeOfDay initialTime,
+    required bool isToday,
+    TimeOfDay? minTimeIfToday,
+  }) async {
+
+    String helpText = 'ENTER TIME (9:00 AM - 7:00 PM)';
+
+    // Agar aaj ka din hai, to Help Text change karo
+    // Example: "VALID TIME: 6:30 PM - 7:00 PM"
+    if (isToday && minTimeIfToday != null) {
+      final String minTimeStr = minTimeIfToday.format(context);
+      helpText = 'VALID TIME: $minTimeStr - 7:00 PM';
     }
 
     return await showTimePicker(
       context: context,
-      initialTime: initial,
-      // DIGITAL INPUT MODE
-      initialEntryMode: TimePickerEntryMode.input,
-      helpText: 'ENTER TIME (9:00 AM - 7:00 PM)',
-      errorInvalidText: 'Enter a valid time',
+      initialTime: initialTime, // Ye wo time hai jo box me pre-filled dikhega
+      initialEntryMode: TimePickerEntryMode.input, // Input mode taaki user dekh sake
+      helpText: helpText, // Custom message top par
+      errorInvalidText: 'Please enter a valid time within range',
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -1322,6 +1366,12 @@ class _VanRoutePageState extends State<VanRoutePage>
               dayPeriodBorderSide: const BorderSide(color: Color(0xFFB21E1E)),
               dayPeriodTextColor: const Color(0xFFB21E1E),
               dayPeriodColor: const Color(0xFFB21E1E).withOpacity(0.1),
+              // Help text style ko thoda highlight karte hain
+              helpTextStyle: TextStyle(
+                color: isToday ? const Color(0xFFB21E1E) : Colors.grey[700],
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
             ),
           ),
           child: child!,
