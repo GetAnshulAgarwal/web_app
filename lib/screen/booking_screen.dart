@@ -52,6 +52,46 @@ class _VanRoutePageState extends State<VanRoutePage>
     },
   ];
 
+  List<String> generateBookingSlots() {
+    DateTime now = DateTime.now();
+
+    // 1. Shop Khulne ka time set karein (Aaj subah 9:00 AM)
+    DateTime shopOpenTime = DateTime(now.year, now.month, now.day, 9, 0);
+
+    // 2. Decide karein ki list kahan se shuru karni hai
+    DateTime startTime;
+
+    if (now.isBefore(shopOpenTime)) {
+      // SCENARIO: Agar abhi subah ke 7 ya 8 baje hain
+      // To hum zabardasti 9:00 AM se start karenge
+      startTime = shopOpenTime;
+    } else {
+      // SCENARIO: Agar 9 baj chuke hain (jaise 10:00 AM ho raha hai)
+      // To hume purana time nahi dikhana, abhi se start karenge
+      // (Ya aap chaho to ise bhi round off kar sakte ho agle aadhe ghante pe)
+      startTime = now;
+    }
+
+    // 3. Slots Generate karein (Example: Har 30 min ka slot)
+    List<String> slots = [];
+    DateTime currentTimeSlot = startTime;
+
+    // Maan lijiye shop raat 9 baje (21:00) band hoti hai
+    DateTime closingTime = DateTime(now.year, now.month, now.day, 21, 0);
+
+    while (currentTimeSlot.isBefore(closingTime)) {
+      // Time format karke list mein add karein (Requires intl package)
+      // Ya manual formatting karein
+      String formattedTime = "${currentTimeSlot.hour}:${currentTimeSlot.minute.toString().padLeft(2, '0')}";
+      slots.add(formattedTime);
+
+      // 30 minute add karein next slot ke liye
+      currentTimeSlot = currentTimeSlot.add(const Duration(minutes: 30));
+    }
+
+    return slots;
+  }
+
   // State variables
   List<UserBooking> _userBookings = [];
 
@@ -1108,6 +1148,10 @@ class _VanRoutePageState extends State<VanRoutePage>
     final bool isToday = selectedDate.year == now.year &&
         selectedDate.month == now.month &&
         selectedDate.day == now.day;
+
+    if (isToday && now.hour < 9) {
+      // Show slots starting from 9:00 AM
+    }
 
     // Time picker kholte waqt hum wahi time pass karenge jo valid hai
     TimeOfDay timeToDisplayInPicker = initialTimeToShow;
