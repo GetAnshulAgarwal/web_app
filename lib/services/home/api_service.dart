@@ -254,7 +254,7 @@ class ApiService {
               // Use the correct factory that exists in your model
               return Banner.fromBannerApiJson(json);
             } catch (e) {
-              foundation.debugPrint('âŒ Error parsing banner: $e');
+              foundation.debugPrint('â�Œ Error parsing banner: $e');
               return null;
             }
           })
@@ -281,7 +281,7 @@ class ApiService {
           return banners.isNotEmpty ? banners : await _getFallbackBanners();
         } else {
           foundation.debugPrint(
-            'âš ï¸ API Error: ${response.statusCode} - ${response.body}',
+            'âš ï¸� API Error: ${response.statusCode} - ${response.body}',
           );
           return await _getFallbackBanners();
         }
@@ -969,7 +969,7 @@ class ApiService {
   // SEARCH HELPER METHODS
   // ========================================
 
-  static List<Product> _sortByRelevance(List<Product> products, String query) {
+    static List<Product> _sortByRelevance(List<Product> products, String query) {
     final queryLower = query.toLowerCase().trim();
     final List<MapEntry<Product, int>> scoredProducts = [];
 
@@ -980,16 +980,18 @@ class ApiService {
 
       int score = 0;
 
+      // --- Exact & Strong Matches ---
       if (nameLower == queryLower) score += 100;
       if (nameLower.startsWith(queryLower)) score += 80;
       if (nameLower.contains(queryLower)) score += 50;
       if (brandLower.contains(queryLower)) score += 40;
       if (descLower.contains(queryLower)) score += 30;
 
+      // --- Word-based Matching ---
       final queryWords =
-      queryLower.split(' ').where((word) => word.length > 1).toList();
+          queryLower.split(' ').where((word) => word.length > 1).toList();
       final nameWords =
-      nameLower.split(' ').where((word) => word.length > 1).toList();
+          nameLower.split(' ').where((word) => word.length > 1).toList();
 
       for (final queryWord in queryWords) {
         for (final nameWord in nameWords) {
@@ -1009,9 +1011,12 @@ class ApiService {
         }
       }
 
-      if (score == 0) {
+      // --- FUZZY MATCHING (Corrected Block) ---
+      // Only check fuzzy match if score is still 0 AND query is long enough.
+      // This prevents "daal" (4 chars) from matching "daily" via fuzzy logic.
+      if (score == 0 && queryLower.length > 4) {
         if (_fuzzyMatch(nameLower, queryLower)) {
-          score += 25;
+          score += 15; // Low score for fuzzy matches
         }
       }
 
@@ -1023,6 +1028,7 @@ class ApiService {
     scoredProducts.sort((a, b) => b.value.compareTo(a.value));
     return scoredProducts.map((entry) => entry.key).toList();
   }
+
 
   static bool _isSimilarWord(String word1, String word2) {
     final variations = {
@@ -1229,7 +1235,7 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body);
-        foundation.debugPrint('ðŸ” Fetched product $productId: $json');
+        foundation.debugPrint('ðŸ”� Fetched product $productId: $json');
         return Product.fromJson(
           json['data'] ?? json,
         ); // Adjust if response wraps data in 'data'
