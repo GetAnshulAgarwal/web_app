@@ -1199,16 +1199,31 @@ class ApiService {
       }
     }*/
 
-  static bool _fuzzyMatch(String text, String query) {
+    static bool _fuzzyMatch(String text, String query) {
+    // Safety check for very short queries
     if (query.length < 3) return false;
+    
+    // Convert to lowercase for comparison
+    final t = text.toLowerCase();
+    final q = query.toLowerCase();
 
-    int matches = 0;
-    for (int i = 0; i < query.length; i++) {
-      if (text.contains(query[i])) matches++;
+    // 1. Direct substring check (fastest)
+    if (t.contains(q)) return true;
+
+    // 2. Sequential Character Check
+    // This ensures "d-a-l" matches "dal" or "dual" 
+    // but prevents "lad" (wrong order) from matching "dal"
+    int queryIndex = 0;
+    for (int i = 0; i < t.length && queryIndex < q.length; i++) {
+      if (t[i] == q[queryIndex]) {
+        queryIndex++;
+      }
     }
-
-    return (matches / query.length) >= 0.7;
+    
+    // Only return true if we found the entire query sequence in order
+    return queryIndex == q.length;
   }
+
 
   static Future<Product> getProduct(String productId) async {
     try {
